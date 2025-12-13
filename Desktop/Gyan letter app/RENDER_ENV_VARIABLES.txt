@@ -1,0 +1,16 @@
+# Render Environment Variables
+
+## Backend (Web Service) Environment Variables:
+DB_HOST=ep-flat-bird-afkh2n4z-pooler.c-2.us-west-2.aws.neon.tech
+DB_USER=neondb_owner
+DB_PASSWORD=npg_1c6KUGfSRJvw
+DB_NAME=neondb
+DB_PORT=5432
+NODE_ENV=production
+PORT=10000
+
+## Frontend (Static Site) Environment Variables:
+VITE_API_URL=https://your-backend-name.onrender.com
+
+# IMPORTANT: Replace "your-backend-name" with your actual Render backend service name!
+

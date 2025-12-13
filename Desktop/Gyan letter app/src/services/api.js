@@ -1,12 +1,16 @@
 // API service for frontend to communicate with backend
 // Automatically detect API URL based on environment
 const getApiBaseUrl = () => {
-  // In production (Vercel), use the same origin
+  // If VITE_API_URL is set (for Render or custom deployments), use it
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL + '/api'
+  }
+  // In production without VITE_API_URL (Vercel), use the same origin
   if (import.meta.env.PROD) {
     return window.location.origin + '/api'
   }
   // In development, use localhost
-  return import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+  return 'http://localhost:5000/api'
 }
 
 const API_BASE_URL = getApiBaseUrl()
