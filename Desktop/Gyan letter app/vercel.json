@@ -6,17 +6,8 @@
   },
   "rewrites": [
     {
-      "source": "/api/records/(.*)",
-      "destination": "/api/records/$1"
-    },
-    {
-      "source": "/api/health",
-      "destination": "/api/health"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
 }
-
