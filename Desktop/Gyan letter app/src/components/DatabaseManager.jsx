@@ -1088,23 +1088,31 @@ export default function DatabaseManager() {
       return
     }
 
-    const queryLower = query.toLowerCase()
+    const queryLower = query.toLowerCase().trim()
+    
+    // Debug logging
+    console.log('[Auto-fill] Searching for:', query, 'Total records:', records.length)
+    
     const matches = records
       .filter(record => {
-        const organizationName = record['Organization Name'] || ''
+        const organizationName = (record['Organization Name'] || '').toString().trim()
+        if (!organizationName) return false
         return organizationName.toLowerCase().includes(queryLower)
       })
       .map(record => ({
         id: record.id,
-        name: record['Organization Name'] || '',
+        name: (record['Organization Name'] || '').toString().trim(),
         record: record
       }))
-      // Remove duplicates based on university name
-      .filter((item, index, self) => 
-        index === self.findIndex(t => t.name.toLowerCase() === item.name.toLowerCase())
-      )
+      // Remove duplicates based on university name (case-insensitive)
+      .filter((item, index, self) => {
+        const itemNameLower = item.name.toLowerCase()
+        return index === self.findIndex(t => t.name.toLowerCase() === itemNameLower)
+      })
       .slice(0, 10) // Limit to 10 suggestions
 
+    console.log('[Auto-fill] Found matches:', matches.length, matches.map(m => m.name))
+    
     setUniversitySuggestions(matches)
     setShowUniversityDropdown(matches.length > 0)
   }
