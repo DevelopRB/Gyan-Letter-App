@@ -1114,36 +1114,40 @@ export default function DatabaseManager() {
     const record = universityRecord.record
     
     // Fields to auto-populate from the selected university record
+    // These fields match the user requirements for auto-filling university details
     const universityFields = [
-      'Address-1',
-      'Adddress-2',
-      'Address-3',
-      'Landmark',
-      'City / Campus',
-      'District',
-      'State / UT',
-      'Postal Code',
-      'Country',
-      'Google Map Link',
-      'GeoCoordinates',
-      'Year Established',
-      'Accreditation',
-      'Approval',
-      'Website',
-      'Contact Email-1',
-      'Contact Email-2',
-      'Contact Phone-1',
-      'Contact Phone-2',
-      'Contact Mobile',
-      'Contact Whatsapp',
-      'Contact Fax-2'
+      'Address-1',           // Address Line 1
+      'Adddress-2',          // Address Line 2
+      'Address-3',           // Address Line 3
+      'Landmark',            // Landmark
+      'City / Campus',       // City / Campus
+      'District',            // District
+      'State / UT',          // State / UT
+      'Postal Code',         // Postal Code
+      'Country',             // Country
+      'Google Map Link',     // Google Map Link
+      'GeoCoordinates',      // Geo-Coordinates
+      'Year Established',    // Year Established
+      'Accreditation',       // Accreditation
+      'Approval',            // Approval
+      'Website',             // Website
+      'Contact Email-1',     // Contact Email 1
+      'Contact Email-2',     // Contact Email 2
+      'Contact Phone-1',     // Contact Phone 1
+      'Contact Phone-2',     // Contact Phone 2
+      'Contact Mobile',      // Contact Mobile
+      'Contact Whatsapp',    // WhatsApp
+      'Contact Fax-2'        // Fax
     ]
 
     // Update form data with university details
     const updatedFormData = { ...formData }
+    let fieldsPopulated = 0
+    
     universityFields.forEach(field => {
       if (record[field] !== undefined && record[field] !== null && record[field] !== '') {
         updatedFormData[field] = record[field]
+        fieldsPopulated++
       }
     })
 
@@ -1154,6 +1158,11 @@ export default function DatabaseManager() {
     setSelectedUniversityRecord(universityRecord)
     setShowUniversityDropdown(false)
     setUniversitySuggestions([])
+    
+    // Show feedback to user
+    if (fieldsPopulated > 0) {
+      console.log(`[Auto-fill] Populated ${fieldsPopulated} fields from ${universityRecord.name}`)
+    }
   }
 
   const addNewField = () => {
