@@ -3,6 +3,43 @@ import { pool } from '../db.js'
 
 const router = express.Router()
 
+// Helper function to get the next unique ID (GB-01, GB-02, etc.)
+async function getNextUniqueId() {
+  try {
+    // Get all records and find the highest ID
+    const result = await pool.query(
+      'SELECT data FROM records WHERE data->>\'Unique ID\' IS NOT NULL ORDER BY data->>\'Unique ID\' DESC LIMIT 1'
+    )
+    
+    if (result.rows.length === 0) {
+      // No records with IDs yet, start with GB-01
+      return 'GB-01'
+    }
+    
+    const lastId = result.rows[0].data['Unique ID']
+    if (!lastId || typeof lastId !== 'string' || !lastId.startsWith('GB-')) {
+      // If format is wrong, start fresh
+      return 'GB-01'
+    }
+    
+    // Extract the number part
+    const match = lastId.match(/^GB-(\d+)$/)
+    if (!match) {
+      return 'GB-01'
+    }
+    
+    const lastNumber = parseInt(match[1], 10)
+    const nextNumber = lastNumber + 1
+    
+    // Format with leading zeros (GB-01, GB-02, ..., GB-99, GB-100, etc.)
+    return `GB-${nextNumber.toString().padStart(2, '0')}`
+  } catch (error) {
+    console.error('Error getting next unique ID:', error)
+    // Fallback: use timestamp-based ID
+    return `GB-${Date.now().toString().slice(-6)}`
+  }
+}
+
 // Get all records
 router.get('/', async (req, res) => {
   try {
@@ -12,11 +49,20 @@ router.get('/', async (req, res) => {
 
     if (search) {
       // Search in JSONB data using PostgreSQL's JSONB operators
-      query += ` WHERE data::text ILIKE $1`
+      // Prioritize Unique ID field for exact/partial matches
+      query += ` WHERE (data->>'Unique ID' ILIKE $1 OR data::text ILIKE $1)`
       params.push(`%${search}%`)
     }
 
-    query += ' ORDER BY created_at DESC'
+    // Sort by Unique ID if available, otherwise by creation date
+    // Extract numeric part from Unique ID for proper numeric sorting
+    query += ` ORDER BY 
+      CASE 
+        WHEN data->>'Unique ID' IS NOT NULL AND data->>'Unique ID' ~ '^GB-\\d+$' 
+        THEN CAST(SUBSTRING(data->>'Unique ID' FROM 'GB-(\\d+)') AS INTEGER)
+        ELSE 999999
+      END ASC,
+      created_at DESC`
 
     const result = await pool.query(query, params)
     res.json(result.rows)
@@ -55,9 +101,15 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Invalid data format' })
     }
 
+    // Generate unique ID if not already present
+    const recordData = { ...data }
+    if (!recordData['Unique ID'] || recordData['Unique ID'].trim() === '') {
+      recordData['Unique ID'] = await getNextUniqueId()
+    }
+
     const result = await pool.query(
       'INSERT INTO records (data) VALUES ($1) RETURNING id, data, created_at, updated_at',
-      [JSON.stringify(data)]
+      [JSON.stringify(recordData)]
     )
 
     res.status(201).json(result.rows[0])
@@ -96,14 +148,44 @@ router.post('/bulk', async (req, res) => {
       console.log(`📊 Processing ${totalRecords} records in batches...`)
       console.log(`📦 Batch size for logging: ${batchSize} records`)
 
+      // Get starting ID number for bulk import
+      let currentIdNumber = 1
+      const lastIdResult = await client.query(
+        'SELECT data FROM records WHERE data->>\'Unique ID\' IS NOT NULL ORDER BY data->>\'Unique ID\' DESC LIMIT 1'
+      )
+      if (lastIdResult.rows.length > 0) {
+        const lastId = lastIdResult.rows[0].data['Unique ID']
+        const match = lastId?.match(/^GB-(\d+)$/)
+        if (match) {
+          currentIdNumber = parseInt(match[1], 10) + 1
+        }
+      }
+
+      console.log(`🆔 Starting Unique ID generation from: GB-${currentIdNumber.toString().padStart(2, '0')}`)
+
       for (let i = 0; i < records.length; i++) {
-        const recordData = records[i]
+        const recordData = { ...records[i] }
         
         // Validate record data
         if (!recordData || typeof recordData !== 'object') {
           skippedRecords.push({ index: i, reason: 'Invalid record format' })
           console.warn(`⚠️  Skipping invalid record at index ${i}`)
           continue
+        }
+
+        // Generate unique ID if not already present or if empty/null/whitespace
+        const existingUniqueId = recordData['Unique ID']
+        const hasValidUniqueId = existingUniqueId && 
+                                 typeof existingUniqueId === 'string' && 
+                                 existingUniqueId.trim() !== '' &&
+                                 existingUniqueId.trim().startsWith('GB-')
+        
+        if (!hasValidUniqueId) {
+          recordData['Unique ID'] = `GB-${currentIdNumber.toString().padStart(2, '0')}`
+          console.log(`  ✓ Record ${i + 1}: Assigned Unique ID ${recordData['Unique ID']}`)
+          currentIdNumber++
+        } else {
+          console.log(`  ℹ Record ${i + 1}: Already has Unique ID ${existingUniqueId}`)
         }
 
         try {
