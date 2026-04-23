@@ -1,7 +1,6 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import * as XLSX from 'xlsx'
 import { pool, initDatabase } from './backend/db.js'
 import recordsRoutes from './backend/routes/records.js'
 import authRoutes from './backend/routes/auth.js'
@@ -133,17 +132,15 @@ const CRM_TEMPLATE_HEADERS = [
   'File Name'
 ]
 
-// Download CRM template as generated Excel (Render-safe)
+// Download CRM template as generated CSV (Render-safe)
 app.get('/api/template-download', (req, res) => {
   try {
-    const worksheet = XLSX.utils.aoa_to_sheet([CRM_TEMPLATE_HEADERS])
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Template')
+    const escapedHeaders = CRM_TEMPLATE_HEADERS.map((header) => `"${String(header).replace(/"/g, '""')}"`)
+    const csvContent = `${escapedHeaders.join(',')}\n`
 
-    const fileBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition', 'attachment; filename="CRM template.xlsx"')
-    return res.send(fileBuffer)
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename="CRM template.csv"')
+    return res.send(csvContent)
   } catch (error) {
     console.error('Template download generation failed:', error)
     return res.status(500).json({ error: 'Failed to generate template file' })
