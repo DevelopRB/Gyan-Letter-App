@@ -14,6 +14,10 @@ const REQUIRED_COLUMNS = [
   'Ownership Type',
   'Management Type',
   'Subcategory',
+  'Sub category 1',
+  'Sub category 2',
+  'Sub category 3',
+  'Sub category 4',
   'Specialization',
   'Organization Name',
   'University',
@@ -78,6 +82,9 @@ const REQUIRED_COLUMNS = [
   'File Name'
 ]
 
+const CRM_TEMPLATE_FILE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/template-download`
+const REQUIRED_IMPORT_COLUMNS = REQUIRED_COLUMNS.filter((column) => column !== 'Unique ID')
+
 export default function DatabaseManager() {
   const [records, setRecords] = useState([])
   const [filteredRecords, setFilteredRecords] = useState([])
@@ -101,6 +108,10 @@ export default function DatabaseManager() {
   const [rowValidationErrors, setRowValidationErrors] = useState([])
   const [showValidationModal, setShowValidationModal] = useState(false)
   const [pendingExcelData, setPendingExcelData] = useState(null)
+  const [headerMappings, setHeaderMappings] = useState({})
+  const [uploadedHeadersForMapping, setUploadedHeadersForMapping] = useState([])
+  const [customHeaderMode, setCustomHeaderMode] = useState({})
+  const [mappingQuickJumpLetter, setMappingQuickJumpLetter] = useState('')
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
   const [selectedCategories, setSelectedCategories] = useState([])
   const [universitySuggestions, setUniversitySuggestions] = useState([])
@@ -131,6 +142,8 @@ export default function DatabaseManager() {
   const [saveModalFileName, setSaveModalFileName] = useState('')
   const [saveModalCategoryMode, setSaveModalCategoryMode] = useState('existing') // 'existing' or 'new'
   const [saveModalNewCategoryName, setSaveModalNewCategoryName] = useState('')
+  const [rowsPerPage, setRowsPerPage] = useState(50)
+  const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
     loadRecords()
@@ -139,6 +152,32 @@ export default function DatabaseManager() {
   useEffect(() => {
     applyFiltersAndSort()
   }, [records, searchQuery, sortConfig, filters, selectedCategory])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [rowsPerPage, selectedCategory, searchQuery, filters, sortConfig])
+
+  useEffect(() => {
+    const trimmedQuery = searchQuery.trim().toLowerCase()
+    if (!trimmedQuery) return
+
+    // Auto-navigate to the matching record's category when searching.
+    const matchingRecord = records.find((record) => {
+      if (record['Unique ID'] && String(record['Unique ID']).toLowerCase().includes(trimmedQuery)) {
+        return true
+      }
+      return Object.values(record).some((value) =>
+        String(value ?? '').toLowerCase().includes(trimmedQuery)
+      )
+    })
+
+    if (!matchingRecord) return
+
+    const targetCategoryId = matchingRecord._categoryId || '_uncategorized'
+    if (targetCategoryId !== selectedCategory) {
+      handleCategoryChange(targetCategoryId)
+    }
+  }, [searchQuery, records, selectedCategory])
 
   const loadRecords = async () => {
     setLoading(true)
@@ -288,6 +327,19 @@ export default function DatabaseManager() {
     setSortConfig({ key: null, direction: 'asc' })
   }
 
+  const scrollPageToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleCategoryChange = (categoryId) => {
+    const categories = categoryService.getAll()
+    setSelectedCategory(categoryId)
+    setSelectedCategoryData(
+      categoryId && categoryId !== '_uncategorized' ? (categories[categoryId] || null) : null
+    )
+    scrollPageToTop()
+  }
+
   // Validate Excel columns against required columns
   const validateExcelColumns = (headers) => {
     const missingColumns = []
@@ -300,7 +352,7 @@ export default function DatabaseManager() {
     })
     
     // Check each required column
-    REQUIRED_COLUMNS.forEach(requiredCol => {
+    REQUIRED_IMPORT_COLUMNS.forEach(requiredCol => {
       const normalizedRequired = requiredCol.trim().toLowerCase()
       let found = false
       
@@ -333,10 +385,28 @@ export default function DatabaseManager() {
     }
   }
 
-  // Build a mapping from our REQUIRED_COLUMNS (canonical names)
+  const normalizeHeader = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
+
+  const getInitialHeaderMappings = (headers) => {
+    const mappings = {}
+    const normalizedRequiredColumns = REQUIRED_IMPORT_COLUMNS.map((requiredCol) => ({
+      original: requiredCol,
+      normalized: normalizeHeader(requiredCol)
+    }))
+
+    headers.forEach((uploadedHeader) => {
+      const normalizedUploaded = normalizeHeader(uploadedHeader)
+      const guessed = normalizedRequiredColumns.find(column => column.normalized === normalizedUploaded)
+      mappings[uploadedHeader] = guessed ? guessed.original : ''
+    })
+
+    return mappings
+  }
+
+  // Build a mapping from our import-required canonical names
   // to the column indices in the uploaded Excel headers,
   // handling differences in case and whitespace.
-  const buildRequiredColumnMapping = (headers) => {
+  const buildRequiredColumnMapping = (headers, manualMappings = {}) => {
     const requiredColumnIndices = new Map()
     const usedHeaderIndices = new Set()
 
@@ -353,7 +423,7 @@ export default function DatabaseManager() {
       }
     })
 
-    REQUIRED_COLUMNS.forEach(requiredCol => {
+    REQUIRED_IMPORT_COLUMNS.forEach(requiredCol => {
       const normalizedRequired = requiredCol.trim().toLowerCase()
       const normalizedRequiredNoSpaces = normalizedRequired.replace(/\s+/g, '')
 
@@ -369,19 +439,102 @@ export default function DatabaseManager() {
       }
     })
 
+    Object.entries(manualMappings).forEach(([uploadedHeader, mappedRequiredColumn]) => {
+      if (!uploadedHeader || !mappedRequiredColumn) return
+      const normalizedUploadedHeader = normalizeHeader(uploadedHeader)
+      const selectedHeader = normalizedHeaders.find(header => header.normalizedNoSpaces === normalizedUploadedHeader)
+      if (!selectedHeader) return
+      requiredColumnIndices.set(mappedRequiredColumn, selectedHeader.index)
+      usedHeaderIndices.add(selectedHeader.index)
+    })
+
     return { requiredColumnIndices, usedHeaderIndices }
   }
 
+  const getDisplayHeaderMapping = (headers, manualMappings = {}) => {
+    const usedDisplayHeaders = new Set()
+    const mappedHeaders = headers.map((uploadedHeader) => {
+      const manualMappedHeader = manualMappings[uploadedHeader]
+      if (manualMappedHeader) {
+        if (!usedDisplayHeaders.has(manualMappedHeader)) {
+          usedDisplayHeaders.add(manualMappedHeader)
+          return manualMappedHeader
+        }
+        // Avoid collisions when two uploaded headers map to same predefined header.
+        return uploadedHeader
+      }
+
+      const normalizedUploaded = normalizeHeader(uploadedHeader)
+      const autoMatchedHeader = REQUIRED_IMPORT_COLUMNS.find(
+        (requiredHeader) => normalizeHeader(requiredHeader) === normalizedUploaded
+      )
+
+      if (autoMatchedHeader && !usedDisplayHeaders.has(autoMatchedHeader)) {
+        usedDisplayHeaders.add(autoMatchedHeader)
+        return autoMatchedHeader
+      }
+
+      return uploadedHeader
+    })
+
+    return mappedHeaders
+  }
+
+  const getCellDisplayValue = (cellValue) => {
+    if (cellValue === null || cellValue === undefined) return ''
+    if (cellValue instanceof Date) return cellValue.toLocaleDateString()
+    return String(cellValue)
+  }
+
+  const getMappedHeaderOptions = () => {
+    const baseOptions = Array.from(new Set(REQUIRED_IMPORT_COLUMNS))
+    if (!mappingQuickJumpLetter) return baseOptions
+
+    const selectedLetter = mappingQuickJumpLetter.toLowerCase()
+    const startsWithLetter = []
+    const others = []
+
+    baseOptions.forEach((header) => {
+      if (header.toLowerCase().startsWith(selectedLetter)) {
+        startsWithLetter.push(header)
+      } else {
+        others.push(header)
+      }
+    })
+
+    return [...startsWithLetter, ...others]
+  }
+
+  const isPredefinedHeader = (headerName) => {
+    if (!headerName) return false
+    return REQUIRED_IMPORT_COLUMNS.includes(headerName)
+  }
+
+  const buildPreviewFromRows = (rows, headers, manualMappings = {}) => {
+    const displayHeaders = getDisplayHeaderMapping(headers, manualMappings)
+    const previewData = rows.map((row) => {
+      const obj = {}
+      headers.forEach((uploadedHeader, colIndex) => {
+        const displayHeader = displayHeaders[colIndex]
+        if (!displayHeader) return
+        obj[displayHeader] = getCellDisplayValue(row[colIndex])
+      })
+      return obj
+    })
+
+    return { previewData, displayHeaders }
+  }
+
   // Validate row-level data - check if required columns have values
-  const validateRowData = (rows, headers, headerMap) => {
+  const validateRowData = (rows, headers, headerMap, manualMappings = {}) => {
     const rowErrors = []
-    const { requiredColumnIndices } = buildRequiredColumnMapping(headers)
+    const { requiredColumnIndices } = buildRequiredColumnMapping(headers, manualMappings)
     
     // Check each row for missing values in required columns
     rows.forEach((row, rowIndex) => {
       const missingFields = []
       
-      REQUIRED_COLUMNS.forEach(requiredCol => {
+      REQUIRED_IMPORT_COLUMNS.forEach(requiredCol => {
         const colIndex = requiredColumnIndices.get(requiredCol)
         if (colIndex !== undefined) {
           const cellValue = row[colIndex]
@@ -483,6 +636,8 @@ export default function DatabaseManager() {
           setPendingExcelData(tempData)
           setValidationErrors(validation.missingColumns)
           setRowValidationErrors([])
+          setUploadedHeadersForMapping(headers)
+          setHeaderMappings(getInitialHeaderMappings(headers))
           setShowValidationModal(true)
           return
         }
@@ -540,71 +695,18 @@ export default function DatabaseManager() {
           return
         }
 
-        // Build mapping from our REQUIRED_COLUMNS to the uploaded headers
-        const { requiredColumnIndices, usedHeaderIndices } = buildRequiredColumnMapping(headers)
-
-        // Map rows to objects using canonical REQUIRED_COLUMNS first,
-        // then any extra headers, so data is always under the default headers
-        const previewData = allRows.map((row) => {
-          const obj = {}
-
-          // Fill required columns in canonical order
-          REQUIRED_COLUMNS.forEach(requiredCol => {
-            const colIndex = requiredColumnIndices.get(requiredCol)
-            const cellValue = colIndex !== undefined ? row[colIndex] : null
-
-            if (cellValue === null || cellValue === undefined) {
-              obj[requiredCol] = ''
-            } else if (cellValue instanceof Date) {
-              obj[requiredCol] = cellValue.toLocaleDateString()
-            } else {
-              obj[requiredCol] = String(cellValue)
-            }
-          })
-
-          // Add any remaining (non-required) headers
-          headers.forEach((header, colIndex) => {
-            if (!usedHeaderIndices.has(colIndex)) {
-              const cellValue = row[colIndex]
-              if (cellValue === null || cellValue === undefined) {
-                obj[header] = ''
-              } else if (cellValue instanceof Date) {
-                obj[header] = cellValue.toLocaleDateString()
-              } else {
-                obj[header] = String(cellValue)
-              }
-            }
-          })
-
-          // Ensure key order matches REQUIRED_COLUMNS first
-          return reorderFieldsByRequiredColumns(obj)
-        })
-
-        // Headers: canonical REQUIRED_COLUMNS first (that were found), then extra headers
-        const reorderedHeaders = []
-
-        REQUIRED_COLUMNS.forEach(field => {
-          if (requiredColumnIndices.has(field)) {
-            reorderedHeaders.push(field)
-          }
-        })
-
-        headers.forEach((header, colIndex) => {
-          if (!usedHeaderIndices.has(colIndex) && !reorderedHeaders.includes(header)) {
-            reorderedHeaders.push(header)
-          }
-        })
+        const { previewData, displayHeaders } = buildPreviewFromRows(allRows, headers)
 
         console.log(`Excel file parsed:`, {
           sheetRange: firstSheet['!ref'],
           totalRowsInSheet: totalRowsInSheet - 1, // Excluding header
           rowsInJsonData: jsonData.length - 1,
           validRows: allRows.length,
-          headers: reorderedHeaders.length
+          headers: displayHeaders.length
         })
 
         setExcelPreview({
-          headers: reorderedHeaders,
+          headers: displayHeaders,
           data: previewData,
           fileName: file.name,
           totalRows: totalRowsInSheet - 1, // Subtract header row
@@ -620,7 +722,7 @@ export default function DatabaseManager() {
   }
 
   // Process pending Excel data after validation
-  const processPendingExcelData = () => {
+  const processPendingExcelData = (manualMappings = {}) => {
     if (!pendingExcelData) return
 
     const { headers, jsonData, totalRowsInSheet, maxCols, fileName, allRows: preProcessedRows } = pendingExcelData
@@ -658,63 +760,10 @@ export default function DatabaseManager() {
       }
     }
 
-    // Build mapping from our REQUIRED_COLUMNS to the uploaded headers
-    const { requiredColumnIndices, usedHeaderIndices } = buildRequiredColumnMapping(headers)
-
-    // Map rows to objects using canonical REQUIRED_COLUMNS first,
-    // then any extra headers, so data is always under the default headers
-    const previewData = allRows.map((row) => {
-      const obj = {}
-
-      // Fill required columns in canonical order
-      REQUIRED_COLUMNS.forEach(requiredCol => {
-        const colIndex = requiredColumnIndices.get(requiredCol)
-        const cellValue = colIndex !== undefined ? row[colIndex] : null
-
-        if (cellValue === null || cellValue === undefined) {
-          obj[requiredCol] = ''
-        } else if (cellValue instanceof Date) {
-          obj[requiredCol] = cellValue.toLocaleDateString()
-        } else {
-          obj[requiredCol] = String(cellValue)
-        }
-      })
-
-      // Add any remaining (non-required) headers
-      headers.forEach((header, colIndex) => {
-        if (!usedHeaderIndices.has(colIndex)) {
-          const cellValue = row[colIndex]
-          if (cellValue === null || cellValue === undefined) {
-            obj[header] = ''
-          } else if (cellValue instanceof Date) {
-            obj[header] = cellValue.toLocaleDateString()
-          } else {
-            obj[header] = String(cellValue)
-          }
-        }
-      })
-
-      // Ensure key order matches REQUIRED_COLUMNS first
-      return reorderFieldsByRequiredColumns(obj)
-    })
-
-    // Headers: canonical REQUIRED_COLUMNS first (that were found), then extra headers
-    const reorderedHeaders = []
-
-    REQUIRED_COLUMNS.forEach(field => {
-      if (requiredColumnIndices.has(field)) {
-        reorderedHeaders.push(field)
-      }
-    })
-
-    headers.forEach((header, colIndex) => {
-      if (!usedHeaderIndices.has(colIndex) && !reorderedHeaders.includes(header)) {
-        reorderedHeaders.push(header)
-      }
-    })
+    const { previewData, displayHeaders } = buildPreviewFromRows(allRows, headers, manualMappings)
 
     setExcelPreview({
-      headers: reorderedHeaders,
+      headers: displayHeaders,
       data: previewData,
       fileName,
       totalRows: totalRowsInSheet - 1,
@@ -725,9 +774,18 @@ export default function DatabaseManager() {
     setPendingExcelData(null)
     setValidationErrors(null)
     setRowValidationErrors([])
+    setHeaderMappings({})
+    setUploadedHeadersForMapping([])
+    setCustomHeaderMode({})
+    setMappingQuickJumpLetter('')
   }
 
   const handleValidationContinue = () => {
+    if (validationErrors && validationErrors.length > 0) {
+      processPendingExcelData(headerMappings)
+      return
+    }
+
     processPendingExcelData()
   }
 
@@ -736,6 +794,10 @@ export default function DatabaseManager() {
     setPendingExcelData(null)
     setValidationErrors(null)
     setRowValidationErrors([])
+    setHeaderMappings({})
+    setUploadedHeadersForMapping([])
+    setCustomHeaderMode({})
+    setMappingQuickJumpLetter('')
     // Reset file input
     const fileInput = document.getElementById('excel-upload')
     if (fileInput) fileInput.value = ''
@@ -1316,26 +1378,52 @@ export default function DatabaseManager() {
 
   const getFieldNames = () => {
     const allFields = new Set()
-    records.forEach(record => {
+    const sourceRecords = filteredRecords.length > 0 ? filteredRecords : records
+    sourceRecords.forEach(record => {
       Object.keys(record).forEach(key => {
         if (key !== 'id' && key !== 'createdAt' && key !== 'updatedAt') {
           allFields.add(key)
         }
       })
     })
-    const fieldArray = Array.from(allFields)
-    
-    // Sort to put Unique ID first if it exists
-    if (fieldArray.includes('Unique ID')) {
-      const uniqueIdIndex = fieldArray.indexOf('Unique ID')
-      fieldArray.splice(uniqueIdIndex, 1)
-      fieldArray.unshift('Unique ID')
-    }
-    
-    return fieldArray
+    const alwaysVisibleFields = new Set(['Unique ID', '_categoryId', '_categoryName'])
+    const fieldArray = Array.from(allFields).filter((field) => {
+      if (alwaysVisibleFields.has(field)) return true
+      return sourceRecords.some((record) => {
+        const value = record[field]
+        if (value === null || value === undefined) return false
+        const text = String(value).trim()
+        return text !== '' && text !== '-'
+      })
+    })
+
+    const pinnedFirstColumns = ['Unique ID', '_categoryId', '_categoryName']
+    const orderedFields = []
+    const remainingFields = [...fieldArray]
+
+    pinnedFirstColumns.forEach((field) => {
+      const index = remainingFields.indexOf(field)
+      if (index !== -1) {
+        orderedFields.push(field)
+        remainingFields.splice(index, 1)
+      }
+    })
+
+    return [...orderedFields, ...remainingFields]
   }
 
   const allFieldNames = getFieldNames()
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / rowsPerPage))
+  const paginatedFilteredRecords = filteredRecords.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  )
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
 
   // Operator definitions
   const OPERATORS = {
@@ -1758,6 +1846,15 @@ export default function DatabaseManager() {
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-800">Database Manager</h2>
           <div className="flex space-x-2">
+            <a
+              href={CRM_TEMPLATE_FILE_URL}
+              download="CRM template.xlsx"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-indigo-700"
+              title="Download CRM template"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download Template</span>
+            </a>
             <label className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-green-700 cursor-pointer">
               <Upload className="w-4 h-4" />
               <span>Upload Excel</span>
@@ -2002,14 +2099,24 @@ export default function DatabaseManager() {
 
         {showValidationModal && ((validationErrors && validationErrors.length > 0) || (rowValidationErrors && rowValidationErrors.length > 0)) && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-auto">
-              <div className="flex items-center space-x-3 mb-4">
-                <AlertCircle className="w-8 h-8 text-red-600" />
-                <h3 className="text-xl font-bold text-gray-800">
-                  {validationErrors && validationErrors.length > 0 
-                    ? 'Missing Required Columns' 
-                    : 'Missing Values in Required Columns'}
-                </h3>
+            <div className="bg-white rounded-2xl shadow-xl max-w-6xl w-[96vw] max-h-[92vh] overflow-hidden">
+              <div className="p-6 max-h-[92vh] overflow-y-auto">
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center space-x-3">
+                  <AlertCircle className="w-8 h-8 text-red-600" />
+                  <h3 className="text-xl font-bold text-gray-800">
+                    {validationErrors && validationErrors.length > 0 
+                      ? 'Missing Required Columns' 
+                      : 'Missing Values in Required Columns'}
+                  </h3>
+                </div>
+                <button
+                  onClick={handleValidationCancel}
+                  className="text-gray-500 hover:text-gray-700 p-1"
+                  aria-label="Close validation modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
               
               <div className="mb-6 space-y-4">
@@ -2017,7 +2124,7 @@ export default function DatabaseManager() {
                 {validationErrors && validationErrors.length > 0 && (
                   <>
                     <p className="text-gray-700">
-                      The uploaded Excel file is missing the following required columns. Please add these columns to your Excel file before importing.
+                      The uploaded Excel file is missing required columns. Map uploaded Excel headers to your predefined headers to continue.
                     </p>
                     
                     <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -2032,6 +2139,91 @@ export default function DatabaseManager() {
                             </li>
                           ))}
                         </ul>
+                      </div>
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-blue-900 font-semibold mb-3">
+                        Map Missing Headers
+                      </p>
+                      <div className="space-y-3">
+                        {uploadedHeadersForMapping.map((uploadedHeader) => (
+                          <div key={uploadedHeader} className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
+                            <label className="text-sm font-medium text-gray-800">{uploadedHeader}</label>
+                            <div className="space-y-2">
+                              <div className="flex gap-2">
+                                <select
+                                value={
+                                  customHeaderMode[uploadedHeader]
+                                    ? '__custom__'
+                                    : (headerMappings[uploadedHeader] || '')
+                                }
+                                onChange={(e) => {
+                                  const selectedValue = e.target.value
+
+                                  if (selectedValue === '__custom__') {
+                                    setCustomHeaderMode((prev) => ({ ...prev, [uploadedHeader]: true }))
+                                    return
+                                  }
+
+                                  setCustomHeaderMode((prev) => ({ ...prev, [uploadedHeader]: false }))
+                                  setHeaderMappings((prev) => ({ ...prev, [uploadedHeader]: selectedValue }))
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key && /^[a-zA-Z]$/.test(e.key)) {
+                                    setMappingQuickJumpLetter(e.key.toUpperCase())
+                                  } else if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'Delete') {
+                                    setMappingQuickJumpLetter('')
+                                  }
+                                }}
+                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                  <option value="">Do not map</option>
+                                  {getMappedHeaderOptions().map((header) => (
+                                    <option key={`${uploadedHeader}-${header}`} value={header}>
+                                      {header}
+                                    </option>
+                                  ))}
+                                  <option value="__custom__">Add custom header...</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const isCustomActive = !!customHeaderMode[uploadedHeader]
+                                    if (isCustomActive) {
+                                      setCustomHeaderMode((prev) => ({ ...prev, [uploadedHeader]: false }))
+                                      setHeaderMappings((prev) => ({ ...prev, [uploadedHeader]: '' }))
+                                      return
+                                    }
+                                    setCustomHeaderMode((prev) => ({ ...prev, [uploadedHeader]: true }))
+                                    setHeaderMappings((prev) => ({ ...prev, [uploadedHeader]: prev[uploadedHeader] || '' }))
+                                  }}
+                                  className={`px-3 py-2 text-sm border rounded-lg ${
+                                    customHeaderMode[uploadedHeader]
+                                      ? 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
+                                      : 'bg-white border-blue-300 text-blue-700 hover:bg-blue-50'
+                                  }`}
+                                >
+                                  {customHeaderMode[uploadedHeader] ? 'Deselect custom' : 'Custom'}
+                                </button>
+                              </div>
+
+                              {(customHeaderMode[uploadedHeader] || (headerMappings[uploadedHeader] && !isPredefinedHeader(headerMappings[uploadedHeader]))) && (
+                                <input
+                                  type="text"
+                                  value={headerMappings[uploadedHeader] || ''}
+                                  onChange={(e) => {
+                                    const customValue = e.target.value
+                                    setCustomHeaderMode((prev) => ({ ...prev, [uploadedHeader]: true }))
+                                    setHeaderMappings((prev) => ({ ...prev, [uploadedHeader]: customValue }))
+                                  }}
+                                  placeholder="Enter custom header name"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </>
@@ -2075,8 +2267,8 @@ export default function DatabaseManager() {
                 
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <p className="text-yellow-800 text-sm">
-                    <strong>Note:</strong> You can continue importing with missing columns/values, but the data may be incomplete. 
-                    It's recommended to fix these issues in your Excel file before importing for proper data structure.
+                    <strong>Note:</strong> Mapping headers allows import to continue without changing the source Excel file.
+                    For missing row values, data may still be incomplete.
                   </p>
                 </div>
               </div>
@@ -2096,6 +2288,7 @@ export default function DatabaseManager() {
                   <AlertCircle className="w-4 h-4" />
                   <span>Continue Import Anyway</span>
                 </button>
+              </div>
               </div>
             </div>
           </div>
@@ -2540,7 +2733,7 @@ export default function DatabaseManager() {
         {/* Category Selector */}
         <CategorySelector
           selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
+          onCategoryChange={handleCategoryChange}
           onCategorySelect={setSelectedCategoryData}
         />
 
@@ -2565,7 +2758,6 @@ export default function DatabaseManager() {
               onClick={() => {
                 setSelectedCategory(null)
                 setSelectedCategoryData(null)
-                setSelectedItem(null)
               }}
               className="text-blue-600 hover:text-blue-800 text-sm font-medium"
             >
@@ -2613,6 +2805,21 @@ export default function DatabaseManager() {
                 <span>Clear All</span>
               </button>
             )}
+            <div className="ml-auto flex items-center space-x-2">
+              <label className="text-sm text-gray-600">Show</label>
+              <select
+                value={rowsPerPage}
+                onChange={(e) => setRowsPerPage(parseInt(e.target.value, 10))}
+                className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                {[20, 50, 100, 150, 200, 250, 500].map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+              <span className="text-sm text-gray-600">records</span>
+            </div>
           </div>
 
           {showFilters && allFieldNames.length > 0 && (
@@ -2810,11 +3017,7 @@ export default function DatabaseManager() {
         {!selectedCategory && !loading && records.length > 0 && (
           <CategoryDashboard
             records={records}
-            onCategorySelect={(categoryId) => {
-              const categories = categoryService.getAll()
-              setSelectedCategory(categoryId)
-              setSelectedCategoryData(categories[categoryId])
-            }}
+            onCategorySelect={handleCategoryChange}
           />
         )}
 
@@ -2860,7 +3063,7 @@ export default function DatabaseManager() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRecords.map((record) => {
+                {paginatedFilteredRecords.map((record) => {
                   const isEditing = editingId === record.id
                   return (
                     <tr key={record.id} className={isEditing ? 'bg-yellow-50' : 'hover:bg-gray-50'}>
@@ -2940,10 +3143,38 @@ export default function DatabaseManager() {
               )}
               {filteredRecords.length !== records.length && (
                 <span className="text-green-600">
-                  Showing: {filteredRecords.length} filtered records
+                  Showing: {paginatedFilteredRecords.length} of {filteredRecords.length} filtered records
+                </span>
+              )}
+              {filteredRecords.length === records.length && filteredRecords.length > 0 && (
+                <span className="text-green-600">
+                  Showing: {paginatedFilteredRecords.length} of {filteredRecords.length} records
+                </span>
+              )}
+              {filteredRecords.length > 0 && (
+                <span className="text-gray-600">
+                  Showing page {currentPage} of {totalPages}
                 </span>
               )}
             </div>
+            {filteredRecords.length > rowsPerPage && (
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed hover:bg-gray-100"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed hover:bg-gray-100"
+                >
+                  Next
+                </button>
+              </div>
+            )}
             <button
               onClick={handleDeleteAll}
               disabled={loading || records.length === 0 || !selectedCategory}

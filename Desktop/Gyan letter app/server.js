@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import fs from 'fs'
 import { pool, initDatabase } from './backend/db.js'
 import recordsRoutes from './backend/routes/records.js'
 import authRoutes from './backend/routes/auth.js'
@@ -58,6 +59,15 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 // Routes
 app.use('/api/auth', authRoutes)
 app.use('/api/records', recordsRoutes)
+
+// Download CRM template file from local machine path
+app.get('/api/template-download', (req, res) => {
+  const templatePath = 'C:\\Users\\abhis\\Downloads\\CRM template.xlsx'
+  if (!fs.existsSync(templatePath)) {
+    return res.status(404).json({ error: 'Template file not found' })
+  }
+  return res.download(templatePath, 'CRM template.xlsx')
+})
 
 // Health check
 app.get('/api/health', async (req, res) => {
