@@ -173,8 +173,15 @@ async def process_ids(ids):
         output_file = await save_to_excel(all_data)
 
         # Emit the download URL to the frontend
-        socketio.emit('download_ready', {'url': f'/download/{os.path.basename(output_file)}'})
-
+        socketio.emit('download_ready', {
+            
+    'message': 'Scraping completed successfully!',
+    'file_url': f'/download/{os.path.basename(output_file)}',
+    're_enable_button': True
+})
+        
+logging.info("Emitted scraping completion event to frontend.")
+socketio.emit('log_message', "Scraping completed successfully! File ready for download.")
 
 # Route to upload file and start scraping
 @app.route('/upload_file', methods=['POST'])
@@ -259,12 +266,10 @@ def process_batches(ids, batch_size, pause_time):
         # Sleep for the user-defined pause time before the next batch
         time.sleep(pause_time * 60)  # Pause time in seconds
 
-
 # Helper function to store the last processed ID in a file (or database)
 def write_last_processed_id(id):
     with open('last_processed_id.txt', 'w') as f:
         f.write(str(id) if id is not None else '')  # Overwrite and clear file
-
 
 # Helper function to read the last processed ID from a file (or database)
 def read_last_processed_id():
@@ -273,6 +278,5 @@ def read_last_processed_id():
             return f.read().strip()
     return None
 
-
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='127.0.0.1', port=5001, debug=True, allow_unsafe_werkzeug=True)

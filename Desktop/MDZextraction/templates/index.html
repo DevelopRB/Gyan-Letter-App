@@ -18,7 +18,7 @@
         });
 
         // Listen for the scraping done event to re-enable the button and show the download link
-        socket.on('scraping_done', function(data) {
+        socket.on('download_ready', function(data) {
             console.log(data.message);  // This is the response from the backend
             
             // Display an alert message to the user
