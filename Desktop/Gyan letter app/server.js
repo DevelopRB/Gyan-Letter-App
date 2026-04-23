@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import fs from 'fs'
+import XLSX from 'xlsx'
 import { pool, initDatabase } from './backend/db.js'
 import recordsRoutes from './backend/routes/records.js'
 import authRoutes from './backend/routes/auth.js'
@@ -60,13 +60,94 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 app.use('/api/auth', authRoutes)
 app.use('/api/records', recordsRoutes)
 
-// Download CRM template file from local machine path
+const CRM_TEMPLATE_HEADERS = [
+  'Main Category',
+  'Ownership Type',
+  'Management Type',
+  'Subcategory',
+  'Sub category 1',
+  'Sub category 2',
+  'Sub category 3',
+  'Sub category 4',
+  'Specialization',
+  'Organization Name',
+  'University',
+  'University Code / Short Code',
+  'Address-1',
+  'Adddress-2',
+  'Address-3',
+  'Landmark',
+  'City / Campus',
+  'District',
+  'State / UT',
+  'Postal Code',
+  'Country',
+  'Google Map Link',
+  'GeoCoordinates',
+  'Year Established',
+  'Accreditation',
+  'Approval',
+  'Website',
+  'Contact Email-1',
+  'Contact Email-2',
+  'Contact Phone-1',
+  'Contact Phone-2',
+  'Contact Mobile',
+  'Contact Whatsapp',
+  'Contact Fax-2',
+  'Affiliated Colleges',
+  'Mode',
+  'Notes',
+  'Faculty ID',
+  'honorific',
+  'Full Name',
+  'Gender',
+  'Department',
+  'Office Address (Room, Block, Floor)',
+  'School / Division',
+  'Subjects Taught',
+  'Specialization',
+  'Research Area',
+  'Experience (Years)',
+  'Designation',
+  'Designation-Category',
+  'Highest Qualification',
+  'Qualified From',
+  'Certifications',
+  'Official Email',
+  'Personal Email',
+  'Mobile',
+  'WhatsApp',
+  'Office Extension',
+  'Office Address',
+  'Profile Link',
+  'Google Scholar',
+  'ResearchGate',
+  'LinkedIn',
+  'ORCID',
+  'Committees',
+  'Additional Roles',
+  'ID Proof',
+  'Certificates',
+  'Status',
+  'File Name'
+]
+
+// Download CRM template as generated Excel (Render-safe)
 app.get('/api/template-download', (req, res) => {
-  const templatePath = 'C:\\Users\\abhis\\Downloads\\CRM template.xlsx'
-  if (!fs.existsSync(templatePath)) {
-    return res.status(404).json({ error: 'Template file not found' })
+  try {
+    const worksheet = XLSX.utils.aoa_to_sheet([CRM_TEMPLATE_HEADERS])
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Template')
+
+    const fileBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', 'attachment; filename="CRM template.xlsx"')
+    return res.send(fileBuffer)
+  } catch (error) {
+    console.error('Template download generation failed:', error)
+    return res.status(500).json({ error: 'Failed to generate template file' })
   }
-  return res.download(templatePath, 'CRM template.xlsx')
 })
 
 // Health check
