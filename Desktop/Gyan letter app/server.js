@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import XLSX from 'xlsx'
+import * as XLSX from 'xlsx'
 import { pool, initDatabase } from './backend/db.js'
 import recordsRoutes from './backend/routes/records.js'
 import authRoutes from './backend/routes/auth.js'
