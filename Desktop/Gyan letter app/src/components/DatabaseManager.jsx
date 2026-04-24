@@ -148,6 +148,19 @@ export default function DatabaseManager() {
   const [saveModalNewCategoryName, setSaveModalNewCategoryName] = useState('')
   const [rowsPerPage, setRowsPerPage] = useState(50)
   const [currentPage, setCurrentPage] = useState(1)
+  const [importProgress, setImportProgress] = useState({
+    currentChunk: 0,
+    totalChunks: 0,
+    uploadedRecords: 0,
+    totalRecords: 0,
+    percent: 0
+  })
+  const [deleteProgress, setDeleteProgress] = useState({
+    processed: 0,
+    total: 0,
+    percent: 0,
+    etaSeconds: null
+  })
 
   useEffect(() => {
     loadRecords()
@@ -874,6 +887,15 @@ export default function DatabaseManager() {
         const result = await databaseService.bulkAdd(chunk)
         totalImported += result.count || 0
         totalSkipped += result.skipped || 0
+        const processedRecords = Math.min((chunkIndex + 1) * IMPORT_CHUNK_SIZE, totalRows)
+        const progressPercent = Math.round((processedRecords / totalRows) * 100)
+        setImportProgress({
+          currentChunk: chunkIndex + 1,
+          totalChunks,
+          uploadedRecords: processedRecords,
+          totalRecords: totalRows,
+          percent: progressPercent
+        })
         if (result.recordsPerSecond) {
           latestSpeed = result.recordsPerSecond
         }
@@ -923,6 +945,13 @@ export default function DatabaseManager() {
       alert(`Failed to import records: ${errorMessage}\n\nDuration: ${duration}s\n\nCheck browser console and backend server logs for details.`)
     } finally {
       setLoading(false)
+      setImportProgress({
+        currentChunk: 0,
+        totalChunks: 0,
+        uploadedRecords: 0,
+        totalRecords: 0,
+        percent: 0
+      })
     }
   }
 
@@ -1150,8 +1179,16 @@ export default function DatabaseManager() {
       // Delete records one by one
       let deletedCount = 0
       let failedCount = 0
+      const deleteStartTime = Date.now()
+      setDeleteProgress({
+        processed: 0,
+        total: recordsToDelete.length,
+        percent: 0,
+        etaSeconds: null
+      })
 
-      for (const record of recordsToDelete) {
+      for (let index = 0; index < recordsToDelete.length; index++) {
+        const record = recordsToDelete[index]
         try {
           await databaseService.delete(record.id)
           deletedCount++
@@ -1159,6 +1196,19 @@ export default function DatabaseManager() {
           console.error(`Failed to delete record ${record.id}:`, err)
           failedCount++
         }
+
+        const processed = index + 1
+        const elapsedSeconds = Math.max((Date.now() - deleteStartTime) / 1000, 0.001)
+        const avgPerRecord = elapsedSeconds / processed
+        const remaining = Math.max(recordsToDelete.length - processed, 0)
+        const etaSeconds = remaining > 0 ? Math.ceil(remaining * avgPerRecord) : 0
+        const percent = Math.round((processed / recordsToDelete.length) * 100)
+        setDeleteProgress({
+          processed,
+          total: recordsToDelete.length,
+          percent,
+          etaSeconds
+        })
       }
 
       console.log(`✓ Deleted ${deletedCount} records from category`)
@@ -1181,12 +1231,24 @@ export default function DatabaseManager() {
       alert('Failed to delete records. Please check the console for details.')
     } finally {
       setLoading(false)
+      setDeleteProgress({
+        processed: 0,
+        total: 0,
+        percent: 0,
+        etaSeconds: null
+      })
     }
   }
 
   const cancelDeleteAll = () => {
     setDeleteAllConfirm(false)
     setDeleteAllConfirmText('')
+    setDeleteProgress({
+      processed: 0,
+      total: 0,
+      percent: 0,
+      etaSeconds: null
+    })
   }
 
   const handleCancel = () => {
@@ -1991,6 +2053,25 @@ export default function DatabaseManager() {
                   autoFocus
                 />
               </div>
+              {loading && deleteProgress.total > 0 && (
+                <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 mb-6">
+                  <div className="flex items-center justify-between text-sm text-rose-900 mb-2">
+                    <span className="font-medium">
+                      Deleting records: {deleteProgress.processed}/{deleteProgress.total}
+                    </span>
+                    <span>{deleteProgress.percent}%</span>
+                  </div>
+                  <div className="w-full bg-rose-100 rounded-full h-2.5">
+                    <div
+                      className="bg-rose-600 h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${deleteProgress.percent}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-rose-700 mt-2">
+                    ETA: {deleteProgress.etaSeconds === null ? 'Calculating...' : `${deleteProgress.etaSeconds}s`}
+                  </p>
+                </div>
+              )}
               <div className="flex space-x-3">
                 <button
                   onClick={confirmDeleteAll}
@@ -2795,6 +2876,26 @@ export default function DatabaseManager() {
                     )}
                   </div>
                 </div>
+
+                {loading && importProgress.totalRecords > 0 && (
+                  <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                    <div className="flex items-center justify-between text-sm text-indigo-900 mb-2">
+                      <span className="font-medium">
+                        Uploading records: {importProgress.uploadedRecords}/{importProgress.totalRecords}
+                      </span>
+                      <span>{importProgress.percent}%</span>
+                    </div>
+                    <div className="w-full bg-indigo-100 rounded-full h-2.5">
+                      <div
+                        className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300"
+                        style={{ width: `${importProgress.percent}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-indigo-700 mt-2">
+                      Chunk {importProgress.currentChunk} of {importProgress.totalChunks}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="overflow-x-auto mb-4 border border-gray-200 rounded">
