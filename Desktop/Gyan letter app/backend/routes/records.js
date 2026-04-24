@@ -2,6 +2,8 @@ import express from 'express'
 import { pool } from '../db.js'
 
 const router = express.Router()
+const INSERT_CHUNK_SIZE = 500
+const RESPONSE_PREVIEW_LIMIT = 10
 
 // Helper function to get the next unique ID (GB-01, GB-02, etc.)
 async function getNextUniqueId() {
@@ -140,21 +142,26 @@ router.post('/bulk', async (req, res) => {
       console.log('🔄 Starting database transaction...')
       await client.query('BEGIN')
 
-      const insertedRecords = []
+      const insertedRecordsPreview = []
       const skippedRecords = []
       const totalRecords = records.length
-      const batchSize = Math.max(100, Math.floor(totalRecords / 10)) // Log every 10% or every 100 records
+      const logBatchSize = Math.max(100, Math.floor(totalRecords / 10)) // Log every 10% or every 100 records
+      let insertedCount = 0
 
       console.log(`📊 Processing ${totalRecords} records in batches...`)
-      console.log(`📦 Batch size for logging: ${batchSize} records`)
+      console.log(`📦 Insert chunk size: ${INSERT_CHUNK_SIZE} records`)
 
       // Get starting ID number for bulk import
       let currentIdNumber = 1
       const lastIdResult = await client.query(
-        'SELECT data FROM records WHERE data->>\'Unique ID\' IS NOT NULL ORDER BY data->>\'Unique ID\' DESC LIMIT 1'
+        `SELECT data->>'Unique ID' AS unique_id
+         FROM records
+         WHERE data->>'Unique ID' ~ '^GB-\\d+$'
+         ORDER BY CAST(SUBSTRING(data->>'Unique ID' FROM 'GB-(\\d+)') AS INTEGER) DESC
+         LIMIT 1`
       )
       if (lastIdResult.rows.length > 0) {
-        const lastId = lastIdResult.rows[0].data['Unique ID']
+        const lastId = lastIdResult.rows[0].unique_id
         const match = lastId?.match(/^GB-(\d+)$/)
         if (match) {
           currentIdNumber = parseInt(match[1], 10) + 1
@@ -162,6 +169,8 @@ router.post('/bulk', async (req, res) => {
       }
 
       console.log(`🆔 Starting Unique ID generation from: GB-${currentIdNumber.toString().padStart(2, '0')}`)
+
+      const preparedRecords = []
 
       for (let i = 0; i < records.length; i++) {
         const recordData = { ...records[i] }
@@ -182,27 +191,52 @@ router.post('/bulk', async (req, res) => {
         
         if (!hasValidUniqueId) {
           recordData['Unique ID'] = `GB-${currentIdNumber.toString().padStart(2, '0')}`
-          console.log(`  ✓ Record ${i + 1}: Assigned Unique ID ${recordData['Unique ID']}`)
           currentIdNumber++
-        } else {
-          console.log(`  ℹ Record ${i + 1}: Already has Unique ID ${existingUniqueId}`)
         }
 
-        try {
-          const result = await client.query(
-            'INSERT INTO records (data) VALUES ($1) RETURNING id, data, created_at, updated_at',
-            [JSON.stringify(recordData)]
-          )
-          insertedRecords.push(result.rows[0])
+        preparedRecords.push({ index: i, data: recordData })
+      }
 
-          // Log progress at intervals
-          if ((i + 1) % batchSize === 0 || i === records.length - 1) {
-            const progress = ((i + 1) / totalRecords * 100).toFixed(1)
-            console.log(`  ✓ Processed ${i + 1}/${totalRecords} records (${progress}%)`)
+      for (let i = 0; i < preparedRecords.length; i += INSERT_CHUNK_SIZE) {
+        const chunk = preparedRecords.slice(i, i + INSERT_CHUNK_SIZE)
+
+        try {
+          const valuesClause = chunk
+            .map((_, idx) => `($${idx + 1}::jsonb)`)
+            .join(', ')
+          const params = chunk.map((item) => JSON.stringify(item.data))
+          const result = await client.query(
+            `INSERT INTO records (data) VALUES ${valuesClause} RETURNING id, data, created_at, updated_at`,
+            params
+          )
+
+          insertedCount += result.rowCount
+          if (insertedRecordsPreview.length < RESPONSE_PREVIEW_LIMIT) {
+            const remainingSlots = RESPONSE_PREVIEW_LIMIT - insertedRecordsPreview.length
+            insertedRecordsPreview.push(...result.rows.slice(0, remainingSlots))
           }
         } catch (insertError) {
-          skippedRecords.push({ index: i, reason: insertError.message })
-          console.error(`  ✗ Failed to insert record at index ${i}: ${insertError.message}`)
+          // Fall back to row-level insert for this chunk so valid rows still import
+          for (const item of chunk) {
+            try {
+              const result = await client.query(
+                'INSERT INTO records (data) VALUES ($1) RETURNING id, data, created_at, updated_at',
+                [JSON.stringify(item.data)]
+              )
+              insertedCount += 1
+              if (insertedRecordsPreview.length < RESPONSE_PREVIEW_LIMIT) {
+                insertedRecordsPreview.push(result.rows[0])
+              }
+            } catch (rowInsertError) {
+              skippedRecords.push({ index: item.index, reason: rowInsertError.message })
+            }
+          }
+        }
+
+        const processed = Math.min(i + INSERT_CHUNK_SIZE, preparedRecords.length)
+        if (processed % logBatchSize === 0 || processed === preparedRecords.length) {
+          const progress = ((processed / preparedRecords.length) * 100).toFixed(1)
+          console.log(`  ✓ Processed ${processed}/${preparedRecords.length} records (${progress}%)`)
         }
       }
 
@@ -213,10 +247,11 @@ router.post('/bulk', async (req, res) => {
       const duration = ((endTime - startTime) / 1000).toFixed(2)
       
       console.log('\n=== BULK IMPORT COMPLETED ===')
-      console.log(`✅ Successfully imported: ${insertedRecords.length} records`)
+      console.log(`✅ Successfully imported: ${insertedCount} records`)
       console.log(`⚠️  Skipped: ${skippedRecords.length} records`)
       console.log(`⏱️  Total time: ${duration} seconds`)
-      console.log(`📈 Average: ${(insertedRecords.length / duration).toFixed(2)} records/second`)
+      const durationInSeconds = Math.max((endTime - startTime) / 1000, 0.001)
+      console.log(`📈 Average: ${(insertedCount / durationInSeconds).toFixed(2)} records/second`)
       console.log(`⏰ End time: ${new Date().toISOString()}`)
       
       if (skippedRecords.length > 0) {
@@ -231,12 +266,12 @@ router.post('/bulk', async (req, res) => {
       console.log('================================\n')
 
       res.status(201).json({ 
-        message: `Successfully imported ${insertedRecords.length} records`,
-        count: insertedRecords.length,
+        message: `Successfully imported ${insertedCount} records`,
+        count: insertedCount,
         skipped: skippedRecords.length,
         duration: `${duration}s`,
-        recordsPerSecond: parseFloat((insertedRecords.length / duration).toFixed(2)),
-        records: insertedRecords.slice(0, 10) // Return first 10 for preview
+        recordsPerSecond: parseFloat((insertedCount / durationInSeconds).toFixed(2)),
+        records: insertedRecordsPreview
       })
     } catch (error) {
       await client.query('ROLLBACK')

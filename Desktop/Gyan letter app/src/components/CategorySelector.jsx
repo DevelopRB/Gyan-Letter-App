@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronDown, Plus, Edit2, Trash2, X, Save } from 'lucide-react'
+import { ChevronDown, Plus, Edit2, Trash2, X, Save, Filter } from 'lucide-react'
 import { categoryService } from '../services/categoryService'
 
 export default function CategorySelector({ selectedCategory, onCategoryChange, onCategorySelect }) {
@@ -107,19 +107,29 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
 
   return (
     <div className="mb-6">
-      <label className="block text-sm font-medium text-gray-700 mb-2">
-        Select Data Category
-      </label>
+      <div className="mb-2 flex items-center justify-between">
+        <label className="flex items-center space-x-2 text-sm font-semibold text-blue-900">
+          <Filter className="w-4 h-4" />
+          <span>Filter by Data Category</span>
+        </label>
+        <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800 font-medium">
+          Filter
+        </span>
+      </div>
       
       <div className="relative">
         <button
           ref={buttonRef}
           type="button"
           onClick={() => setShowDropdown(!showDropdown)}
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-left flex items-center justify-between hover:bg-gray-50"
+          className={`w-full px-4 py-2.5 border-2 rounded-lg text-left flex items-center justify-between transition-colors ${
+            showDropdown
+              ? 'bg-blue-50 border-blue-500'
+              : 'bg-blue-50/40 border-blue-300 hover:bg-blue-50'
+          }`}
         >
-          <span className={selectedCategoryData ? 'text-gray-900' : 'text-gray-500'}>
-            {selectedCategoryData ? selectedCategoryData.name : 'Select a category...'}
+          <span className={selectedCategoryData ? 'text-gray-900' : 'text-gray-600'}>
+            {selectedCategoryData ? selectedCategoryData.name : 'Choose category to filter records...'}
           </span>
           <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${showDropdown ? 'transform rotate-180' : ''}`} />
         </button>

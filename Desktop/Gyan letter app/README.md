@@ -1,181 +1,179 @@
 # Gyan Letter App
 
-A comprehensive web application for managing databases and creating professional letters and emails with template support.
+Gyan Letter App is a full-stack web app for managing database records and creating personalized letters/emails from those records.
 
-## Features
+## What It Does
 
-### 📊 Database Management
-- **PostgreSQL Storage**: All data stored in PostgreSQL database
-- **CRUD Operations**: Add, edit, delete, and search records easily
-- **Excel Import**: Upload Excel files (.xlsx, .xls, .csv) with preview
-- **Dynamic Fields**: Create custom fields for your records
-- **Search & Filter**: Advanced search and filtering capabilities
-- **Sorting**: Sort records by any column
-- **Delete Confirmation**: Safe deletion with confirmation modal
+- Manage records in PostgreSQL (create, update, search, delete, bulk import)
+- Import Excel/CSV data and save it in JSON-based records
+- Auto-generate sequential `Unique ID` values (format: `GB-01`, `GB-02`, ...)
+- Build letter/email content with placeholders such as `{{Full Name}}`
+- Protect the app behind login and JWT-based session verification
+- Export a CRM template CSV from the backend
 
-### ✉️ Letter & Email Editor
-- **Rich Text Editor**: Create professional content with formatting options
-- **Template Variables**: Insert database fields using `{{fieldName}}` syntax
-- **Multiple Formats**: Support for both email and letter formats
-- **Preview**: See how your content looks with actual data
-- **Template Management**: Save and reuse letter/email templates
+## Tech Stack
 
-### 🖨️ Print & Export
-- **Print Functionality**: Print letters with proper formatting
-- **Email Integration**: Open emails in your default email client
-- **HTML Export**: Export letters as HTML files
+- Frontend: React + Vite + Tailwind CSS
+- Backend: Node.js + Express
+- Database: PostgreSQL
+- Auth: JSON Web Token (`jsonwebtoken`)
+- Data processing: `xlsx`
 
 ## Prerequisites
 
-- Node.js (v16 or higher)
-- PostgreSQL (v12 or higher)
+- Node.js 18+ recommended
+- PostgreSQL 12+
+- npm
 
-## Installation
+## Setup
 
-### 1. Install Dependencies
+### 1) Install dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Set Up PostgreSQL Database
+### 2) Create database
 
-1. Create a PostgreSQL database:
 ```sql
 CREATE DATABASE gyan_letter_db;
 ```
 
-2. Create a `.env` file in the root directory:
+### 3) Configure environment
+
+Create `.env` in the project root:
+
 ```env
-# Database Configuration
+# Database
 DB_USER=postgres
 DB_HOST=localhost
 DB_NAME=gyan_letter_db
 DB_PASSWORD=your_password
 DB_PORT=5432
 
-# Server Configuration
+# Backend
 PORT=5000
+FRONTEND_URL=http://localhost:3000
+JWT_SECRET=change-this-in-production
+
+# Login credentials (optional overrides)
+APP_USERNAME=admin
+APP_PASSWORD=admin123
+
+# Frontend (optional for deployed setups)
+VITE_API_URL=
 ```
 
-### 3. Start the Application
+## Run Locally
 
-**Terminal 1 - Start Backend Server:**
+### Option A: Start both services manually (recommended)
+
+Terminal 1 (backend):
+
 ```bash
 npm run server
 ```
 
-**Terminal 2 - Start Frontend Dev Server:**
+Terminal 2 (frontend):
+
 ```bash
-npm run dev
+npm run dev -- --host 0.0.0.0 --port 3000
 ```
 
-The application will be available at:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:5000
+### Option B: Use the helper script
 
-## Usage
+```bash
+npm run start
+```
 
-### Managing Database
+This opens backend and frontend in separate PowerShell windows.
 
-1. Navigate to the **Database** section
-2. Click **Upload Excel** to import data from Excel files
-3. Preview the data before importing
-4. Click **Add Record** to create a new entry manually
-5. Use the search bar to find specific records
-6. Use filters to narrow down results
-7. Click column headers to sort
-8. Edit or delete records using the action buttons
+## Local URLs
 
-### Creating Letters/Emails
+- Frontend: `http://localhost:3000/`
+- Backend: `http://localhost:5000/`
+- Health check: `http://localhost:5000/api/health`
 
-1. Navigate to the **Letter Editor** section
-2. Select a format (Email or Letter)
-3. Choose a record from the database (optional, for variable replacement)
-4. Use the variable buttons to insert database fields
-5. Write your content using the rich text editor
-6. Preview the result with actual data
-7. Print, email, or export your letter
+## Available Scripts
 
-### Using Template Variables
-
-- Click on any variable button to insert it into your content
-- Variables use the format: `{{fieldName}}`
-- When a record is selected, variables are automatically replaced with actual values
-- Example: `{{name}}` will be replaced with the name from the selected record
-
-### Saving Templates
-
-1. Create your letter/email content
-2. Enter a template name
-3. Click **Save Template**
-4. Load saved templates by clicking on them
+- `npm run dev` - Start Vite frontend
+- `npm run build` - Build frontend for production
+- `npm run preview` - Preview production frontend build
+- `npm run server` - Start Express backend
+- `npm run dev:server` - Start backend with Node watch mode
+- `npm run setup` - Run setup script
+- `npm run start` - Run PowerShell starter for both servers
 
 ## API Endpoints
 
-- `GET /api/records` - Get all records (optional `?search=query`)
-- `GET /api/records/:id` - Get a single record
-- `POST /api/records` - Create a new record
-- `POST /api/records/bulk` - Bulk create records (for Excel import)
-- `PUT /api/records/:id` - Update a record
-- `DELETE /api/records/:id` - Delete a record
-- `GET /api/health` - Health check
+### Auth
+
+- `POST /api/auth/login` - Login with username/password
+- `GET /api/auth/verify` - Verify JWT token
+
+### Records
+
+- `GET /api/records` - List records (supports `?search=...`)
+- `GET /api/records/:id` - Get one record
+- `POST /api/records` - Create record
+- `POST /api/records/bulk` - Bulk import records
+- `PUT /api/records/:id` - Update record
+- `DELETE /api/records/:id` - Delete one record
+- `DELETE /api/records` - Delete all records
+
+### Utility
+
+- `GET /api/health` - API/database health status
+- `GET /api/template-download` - Download CRM template CSV
 
 ## Project Structure
 
-```
+```text
 gyan-letter-app/
+├── api/                       # Serverless handlers (deployment targets)
 ├── backend/
-│   ├── db.js              # Database connection and schema
-│   └── routes/
-│       └── records.js     # API routes for records
+│   ├── db.js                  # PostgreSQL pool + schema initialization
+│   ├── middleware/
+│   │   └── auth.js
+│   ├── routes/
+│   │   ├── auth.js
+│   │   └── records.js
+│   └── services/
 ├── src/
 │   ├── components/
-│   │   ├── DatabaseManager.jsx
-│   │   └── LetterEditor.jsx
+│   ├── contexts/
 │   ├── services/
-│   │   ├── api.js         # API service
-│   │   └── database.js    # Database service wrapper
 │   ├── App.jsx
-│   ├── main.jsx
-│   └── index.css
-├── server.js              # Express server
-├── package.json
-└── README.md
+│   └── main.jsx
+├── server.js                  # Main Express entrypoint
+├── start.ps1                  # Windows helper script
+└── package.json
 ```
 
-## Technology Stack
+## Authentication Notes
 
-- **Frontend**: React, React Router, React Quill, Tailwind CSS, Vite
-- **Backend**: Node.js, Express
-- **Database**: PostgreSQL
-- **File Processing**: xlsx library
-
-## Environment Variables
-
-Create a `.env` file with the following variables:
-
-```env
-DB_USER=postgres
-DB_HOST=localhost
-DB_NAME=gyan_letter_db
-DB_PASSWORD=your_password
-DB_PORT=5432
-PORT=5000
-```
+- Default login: `admin` / `admin123` (unless overridden via `.env`)
+- Token is validated at `/api/auth/verify`
+- For production, always set strong values for `JWT_SECRET` and credentials
 
 ## Troubleshooting
 
-### Database Connection Issues
+### Backend starts but frontend cannot fetch API
 
-1. Ensure PostgreSQL is running
-2. Check database credentials in `.env` file
-3. Verify database exists: `CREATE DATABASE gyan_letter_db;`
+- Confirm backend is running on `http://localhost:5000`
+- Confirm frontend is running on `http://localhost:3000`
+- If needed, set `VITE_API_URL=http://localhost:5000` in `.env`
 
-### Port Already in Use
+### PostgreSQL connection errors
 
-- Change the `PORT` in `.env` file
-- Or kill the process using the port
+- Ensure PostgreSQL service is running
+- Recheck `DB_*` values in `.env`
+- Verify database exists and user has access
+
+### Port conflict
+
+- Change `PORT` for backend in `.env`
+- Start frontend on a different port if `3000` is occupied
 
 ## License
 

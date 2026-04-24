@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import fs from 'fs'
 import { pool, initDatabase } from './backend/db.js'
 import recordsRoutes from './backend/routes/records.js'
 import authRoutes from './backend/routes/auth.js'
@@ -59,91 +60,22 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 app.use('/api/auth', authRoutes)
 app.use('/api/records', recordsRoutes)
 
-const CRM_TEMPLATE_HEADERS = [
-  'Main Category',
-  'Ownership Type',
-  'Management Type',
-  'Subcategory',
-  'Sub category 1',
-  'Sub category 2',
-  'Sub category 3',
-  'Sub category 4',
-  'Specialization',
-  'Organization Name',
-  'University',
-  'University Code / Short Code',
-  'Address-1',
-  'Adddress-2',
-  'Address-3',
-  'Landmark',
-  'City / Campus',
-  'District',
-  'State / UT',
-  'Postal Code',
-  'Country',
-  'Google Map Link',
-  'GeoCoordinates',
-  'Year Established',
-  'Accreditation',
-  'Approval',
-  'Website',
-  'Contact Email-1',
-  'Contact Email-2',
-  'Contact Phone-1',
-  'Contact Phone-2',
-  'Contact Mobile',
-  'Contact Whatsapp',
-  'Contact Fax-2',
-  'Affiliated Colleges',
-  'Mode',
-  'Notes',
-  'Faculty ID',
-  'honorific',
-  'Full Name',
-  'Gender',
-  'Department',
-  'Office Address (Room, Block, Floor)',
-  'School / Division',
-  'Subjects Taught',
-  'Specialization',
-  'Research Area',
-  'Experience (Years)',
-  'Designation',
-  'Designation-Category',
-  'Highest Qualification',
-  'Qualified From',
-  'Certifications',
-  'Official Email',
-  'Personal Email',
-  'Mobile',
-  'WhatsApp',
-  'Office Extension',
-  'Office Address',
-  'Profile Link',
-  'Google Scholar',
-  'ResearchGate',
-  'LinkedIn',
-  'ORCID',
-  'Committees',
-  'Additional Roles',
-  'ID Proof',
-  'Certificates',
-  'Status',
-  'File Name'
-]
+const CRM_TEMPLATE_FILE_PATH =
+  process.env.CRM_TEMPLATE_PATH || 'C:\\Users\\abhis\\Downloads\\CRM template.xlsx'
 
-// Download CRM template as generated CSV (Render-safe)
+// Download CRM template as Excel file
 app.get('/api/template-download', (req, res) => {
   try {
-    const escapedHeaders = CRM_TEMPLATE_HEADERS.map((header) => `"${String(header).replace(/"/g, '""')}"`)
-    const csvContent = `${escapedHeaders.join(',')}\n`
+    if (!fs.existsSync(CRM_TEMPLATE_FILE_PATH)) {
+      console.error('CRM template file not found:', CRM_TEMPLATE_FILE_PATH)
+      return res.status(404).json({ error: 'CRM template file not found on server' })
+    }
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-    res.setHeader('Content-Disposition', 'attachment; filename="CRM template.csv"')
-    return res.send(csvContent)
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    return res.download(CRM_TEMPLATE_FILE_PATH, 'CRM template.xlsx')
   } catch (error) {
     console.error('Template download generation failed:', error)
-    return res.status(500).json({ error: 'Failed to generate template file' })
+    return res.status(500).json({ error: 'Failed to download template file' })
   }
 })
 
