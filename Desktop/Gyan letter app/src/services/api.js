@@ -95,6 +95,29 @@ export const apiService = {
     }
   },
 
+  // Bulk update records by Unique ID
+  async bulkUpdate(records) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/records/bulk-update`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ records }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.error || errorData.details || `HTTP ${response.status}: ${response.statusText}`
+        throw new Error(errorMessage)
+      }
+      return response.json()
+    } catch (error) {
+      if (error.message) {
+        throw error
+      }
+      throw new Error(`Network error: ${error.message}`)
+    }
+  },
+
   // Update a record
   async update(id, data) {
     const response = await fetch(`${API_BASE_URL}/records/${id}`, {

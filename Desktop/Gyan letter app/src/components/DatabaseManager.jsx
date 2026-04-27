@@ -98,6 +98,7 @@ export default function DatabaseManager() {
   const [formData, setFormData] = useState({})
   const [excelPreview, setExcelPreview] = useState(null)
   const [showPreview, setShowPreview] = useState(false)
+  const [excelAction, setExcelAction] = useState('import') // 'import' | 'update'
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' })
   const [filters, setFilters] = useState({})
   const [showFilters, setShowFilters] = useState(false)
@@ -155,6 +156,11 @@ export default function DatabaseManager() {
     totalRecords: 0,
     percent: 0
   })
+  const [bulkUpdateErrorModal, setBulkUpdateErrorModal] = useState(null)
+
+  const getRequiredColumnsForMode = (mode = excelAction) => {
+    return mode === 'update' ? ['Unique ID'] : REQUIRED_IMPORT_COLUMNS
+  }
   const [deleteProgress, setDeleteProgress] = useState({
     processed: 0,
     total: 0,
@@ -358,9 +364,10 @@ export default function DatabaseManager() {
   }
 
   // Validate Excel columns against required columns
-  const validateExcelColumns = (headers) => {
+  const validateExcelColumns = (headers, mode = excelAction) => {
     const missingColumns = []
     const headerMap = new Map()
+    const requiredColumns = getRequiredColumnsForMode(mode)
     
     // Normalize headers (trim, lowercase for comparison)
     headers.forEach(header => {
@@ -369,7 +376,7 @@ export default function DatabaseManager() {
     })
     
     // Check each required column
-    REQUIRED_IMPORT_COLUMNS.forEach(requiredCol => {
+    requiredColumns.forEach(requiredCol => {
       const normalizedRequired = requiredCol.trim().toLowerCase()
       let found = false
       
@@ -406,7 +413,7 @@ export default function DatabaseManager() {
 
   const getInitialHeaderMappings = (headers) => {
     const mappings = {}
-    const normalizedRequiredColumns = REQUIRED_IMPORT_COLUMNS.map((requiredCol) => ({
+    const normalizedRequiredColumns = getRequiredColumnsForMode().map((requiredCol) => ({
       original: requiredCol,
       normalized: normalizeHeader(requiredCol)
     }))
@@ -423,7 +430,7 @@ export default function DatabaseManager() {
   // Build a mapping from our import-required canonical names
   // to the column indices in the uploaded Excel headers,
   // handling differences in case and whitespace.
-  const buildRequiredColumnMapping = (headers, manualMappings = {}) => {
+  const buildRequiredColumnMapping = (headers, manualMappings = {}, requiredColumns = getRequiredColumnsForMode()) => {
     const requiredColumnIndices = new Map()
     const usedHeaderIndices = new Set()
 
@@ -440,7 +447,7 @@ export default function DatabaseManager() {
       }
     })
 
-    REQUIRED_IMPORT_COLUMNS.forEach(requiredCol => {
+    requiredColumns.forEach(requiredCol => {
       const normalizedRequired = requiredCol.trim().toLowerCase()
       const normalizedRequiredNoSpaces = normalizedRequired.replace(/\s+/g, '')
 
@@ -482,7 +489,7 @@ export default function DatabaseManager() {
       }
 
       const normalizedUploaded = normalizeHeader(uploadedHeader)
-      const autoMatchedHeader = REQUIRED_IMPORT_COLUMNS.find(
+      const autoMatchedHeader = getRequiredColumnsForMode().find(
         (requiredHeader) => normalizeHeader(requiredHeader) === normalizedUploaded
       )
 
@@ -504,7 +511,7 @@ export default function DatabaseManager() {
   }
 
   const getMappedHeaderOptions = () => {
-    const baseOptions = Array.from(new Set(REQUIRED_IMPORT_COLUMNS))
+    const baseOptions = Array.from(new Set(getRequiredColumnsForMode()))
     if (!mappingQuickJumpLetter) return baseOptions
 
     const selectedLetter = mappingQuickJumpLetter.toLowerCase()
@@ -524,7 +531,7 @@ export default function DatabaseManager() {
 
   const isPredefinedHeader = (headerName) => {
     if (!headerName) return false
-    return REQUIRED_IMPORT_COLUMNS.includes(headerName)
+    return getRequiredColumnsForMode().includes(headerName)
   }
 
   const buildPreviewFromRows = (rows, headers, manualMappings = {}, previewLimit = PREVIEW_ROW_LIMIT) => {
@@ -543,15 +550,15 @@ export default function DatabaseManager() {
   }
 
   // Validate row-level data - check if required columns have values
-  const validateRowData = (rows, headers, headerMap, manualMappings = {}) => {
+  const validateRowData = (rows, headers, manualMappings = {}, requiredColumns = getRequiredColumnsForMode()) => {
     const rowErrors = []
-    const { requiredColumnIndices } = buildRequiredColumnMapping(headers, manualMappings)
+    const { requiredColumnIndices } = buildRequiredColumnMapping(headers, manualMappings, requiredColumns)
     
     // Check each row for missing values in required columns
     rows.forEach((row, rowIndex) => {
       const missingFields = []
       
-      REQUIRED_IMPORT_COLUMNS.forEach(requiredCol => {
+      requiredColumns.forEach(requiredCol => {
         const colIndex = requiredColumnIndices.get(requiredCol)
         if (colIndex !== undefined) {
           const cellValue = row[colIndex]
@@ -581,7 +588,7 @@ export default function DatabaseManager() {
   }
 
   const handleExcelUpload = (event) => {
-    if (!selectedCategory) {
+    if (excelAction === 'import' && !selectedCategory) {
       alert('Select a category first')
       event.target.value = ''
       return
@@ -642,7 +649,7 @@ export default function DatabaseManager() {
         }
 
         // Validate columns before processing data
-        const validation = validateExcelColumns(headers)
+        const validation = validateExcelColumns(headers, excelAction)
         
         if (!validation.isValid) {
           // Store the parsed data temporarily
@@ -696,7 +703,8 @@ export default function DatabaseManager() {
         }
 
         // Validate row-level data
-        const rowErrors = validateRowData(allRows, headers, validation.headerMap)
+        const requiredColumns = getRequiredColumnsForMode(excelAction)
+        const rowErrors = validateRowData(allRows, headers, {}, requiredColumns)
         
         if (rowErrors.length > 0) {
           // Store the parsed data temporarily for validation
@@ -747,8 +755,9 @@ export default function DatabaseManager() {
     reader.readAsArrayBuffer(file)
   }
 
-  const handleUploadClick = (event) => {
-    if (!selectedCategory) {
+  const handleUploadClick = (mode, event) => {
+    setExcelAction(mode)
+    if (mode === 'import' && !selectedCategory) {
       event.preventDefault()
       alert('Select a category first')
     }
@@ -834,12 +843,14 @@ export default function DatabaseManager() {
     setMappingQuickJumpLetter('')
     // Reset file input
     const fileInput = document.getElementById('excel-upload')
+    const updateFileInput = document.getElementById('excel-update-upload')
     if (fileInput) fileInput.value = ''
+    if (updateFileInput) updateFileInput.value = ''
   }
 
   const importExcelData = async () => {
     if (!excelPreview || !excelPreview.rows || excelPreview.rows.length === 0) {
-      alert('No data to import')
+      alert(excelAction === 'update' ? 'No data to update' : 'No data to import')
       return
     }
 
@@ -847,18 +858,21 @@ export default function DatabaseManager() {
     setError(null)
     
     const startTime = Date.now()
-    console.log('\n=== FRONTEND: Starting Import ===')
-    console.log(`📊 Records to import: ${excelPreview.rows.length}`)
+    const actionLabel = excelAction === 'update' ? 'Bulk Update' : 'Import'
+    console.log(`\n=== FRONTEND: Starting ${actionLabel} ===`)
+    console.log(`📊 Records to process: ${excelPreview.rows.length}`)
     console.log(`📋 Headers: ${excelPreview.headers.length}`)
     console.log(`⏰ Start time: ${new Date().toLocaleTimeString()}`)
     
     try {
-      console.log('✅ Starting chunked import without full in-memory conversion')
+      console.log(`✅ Starting chunked ${actionLabel.toLowerCase()} without full in-memory conversion`)
       console.log(`📤 Sending data to backend in chunks of ${IMPORT_CHUNK_SIZE}...`)
 
       let totalImported = 0
       let totalSkipped = 0
+      let totalNotFound = 0
       let latestSpeed = null
+      const validationIssues = []
       const totalRows = excelPreview.rows.length
       const totalChunks = Math.ceil(totalRows / IMPORT_CHUNK_SIZE)
       const categories = categoryService.getAll()
@@ -873,20 +887,70 @@ export default function DatabaseManager() {
         const chunk = rowChunk.map((rowValues) => {
           const record = {}
           excelPreview.headers.forEach((header, headerIndex) => {
+            const rawValue = rowValues[headerIndex]
+            const normalizedHeader = normalizeHeader(header)
+            const stringValue = rawValue === null || rawValue === undefined ? '' : String(rawValue)
+
+            if (excelAction === 'update') {
+              if (normalizedHeader === normalizeHeader('Unique ID')) {
+                record['Unique ID'] = stringValue.trim()
+                return
+              }
+              if (stringValue.trim() !== '') {
+                record[header] = stringValue
+              }
+              return
+            }
+
             if (header !== 'Unique ID') {
-              const rawValue = rowValues[headerIndex]
-              record[header] = rawValue === null || rawValue === undefined ? '' : String(rawValue)
+              record[header] = stringValue
             }
           })
-          record._categoryId = categoryIdToUse
-          record._categoryName = categoryNameToUse
-          return reorderFieldsByRequiredColumns(record)
+
+          if (excelAction === 'import') {
+            record._categoryId = categoryIdToUse
+            record._categoryName = categoryNameToUse
+            return reorderFieldsByRequiredColumns(record)
+          }
+
+          return record
         })
 
         console.log(`📦 Uploading chunk ${chunkIndex + 1}/${totalChunks} (${chunk.length} records)`)
-        const result = await databaseService.bulkAdd(chunk)
+        const result = excelAction === 'update'
+          ? await databaseService.bulkUpdate(chunk)
+          : await databaseService.bulkAdd(chunk)
         totalImported += result.count || 0
         totalSkipped += result.skipped || 0
+        totalNotFound += result.notFound || 0
+        if (excelAction === 'update') {
+          const skippedDetails = Array.isArray(result.skippedDetails) ? result.skippedDetails : []
+          const notFoundDetails = Array.isArray(result.notFoundDetails) ? result.notFoundDetails : []
+          skippedDetails.forEach((entry) => {
+            if (validationIssues.length >= 30) return
+            const missingFields = []
+            const lowerReason = String(entry.reason || '').toLowerCase()
+            if (lowerReason.includes('missing unique id')) missingFields.push('Unique ID')
+            if (lowerReason.includes('missing category id') || lowerReason.includes('missing category')) {
+              missingFields.push('_categoryId', '_categoryName')
+            }
+            validationIssues.push({
+              rowNumber: entry.index + 2,
+              uniqueId: entry.uniqueId || '',
+              reason: entry.reason || 'Invalid row',
+              missingFields
+            })
+          })
+          notFoundDetails.forEach((entry) => {
+            if (validationIssues.length >= 30) return
+            validationIssues.push({
+              rowNumber: entry.index + 2,
+              uniqueId: entry.uniqueId || '',
+              reason: 'Unique ID not found in existing data',
+              missingFields: ['Unique ID']
+            })
+          })
+        }
         const processedRecords = Math.min((chunkIndex + 1) * IMPORT_CHUNK_SIZE, totalRows)
         const progressPercent = Math.round((processedRecords / totalRows) * 100)
         setImportProgress({
@@ -907,8 +971,8 @@ export default function DatabaseManager() {
       const endTime = Date.now()
       const duration = ((endTime - startTime) / 1000).toFixed(2)
       
-      console.log('\n=== FRONTEND: Import Complete ===')
-      console.log(`✅ Successfully imported: ${totalImported} records`)
+      console.log(`\n=== FRONTEND: ${actionLabel} Complete ===`)
+      console.log(`✅ Successfully processed: ${totalImported} records`)
       if (totalSkipped) {
         console.log(`⚠️  Skipped: ${totalSkipped} records`)
       }
@@ -918,31 +982,57 @@ export default function DatabaseManager() {
       }
       console.log('================================\n')
       
-      const successMessage = totalSkipped 
-        ? `Successfully imported ${totalImported} records!\n\nSkipped: ${totalSkipped} records\nTime: ${duration}s\n\nCheck backend console for detailed logs.`
-        : `Successfully imported ${totalImported} records!\n\nTime: ${duration}s\nSpeed: ${latestSpeed || 'N/A'} records/second\n\nCheck backend console for detailed logs.`
-      
-      alert(successMessage)
+      if (excelAction === 'update' && (totalSkipped > 0 || totalNotFound > 0)) {
+        const fieldMissingCounts = {
+          'Unique ID': 0,
+          '_categoryId': 0,
+          '_categoryName': 0
+        }
+        validationIssues.forEach((issue) => {
+          issue.missingFields.forEach((field) => {
+            if (Object.prototype.hasOwnProperty.call(fieldMissingCounts, field)) {
+              fieldMissingCounts[field] += 1
+            }
+          })
+        })
+
+        setBulkUpdateErrorModal({
+          updated: totalImported,
+          missingInvalid: totalSkipped,
+          notMatched: totalNotFound,
+          duration,
+          essentialMissing: fieldMissingCounts,
+          issues: validationIssues
+        })
+        setError('Some rows failed validation. Check popup details and fix the Excel file.')
+      } else {
+        const successMessage = totalSkipped
+          ? `Successfully ${excelAction === 'update' ? 'updated' : 'imported'} ${totalImported} records!\n\nSkipped: ${totalSkipped} records\nTime: ${duration}s\n\nCheck backend console for detailed logs.`
+          : `Successfully ${excelAction === 'update' ? 'updated' : 'imported'} ${totalImported} records!\n\nTime: ${duration}s\nSpeed: ${latestSpeed || 'N/A'} records/second\n\nCheck backend console for detailed logs.`
+        alert(successMessage)
+      }
       setExcelPreview(null)
       setShowPreview(false)
       await loadRecords()
       
       // Reset file input
       const fileInput = document.getElementById('excel-upload')
+      const updateFileInput = document.getElementById('excel-update-upload')
       if (fileInput) fileInput.value = ''
+      if (updateFileInput) updateFileInput.value = ''
     } catch (err) {
       const endTime = Date.now()
       const duration = ((endTime - startTime) / 1000).toFixed(2)
-      const errorMessage = err.message || 'Failed to import records'
+      const errorMessage = err.message || `Failed to ${excelAction === 'update' ? 'update' : 'import'} records`
       
-      console.error('\n=== FRONTEND: Import Failed ===')
+      console.error(`\n=== FRONTEND: ${actionLabel} Failed ===`)
       console.error(`❌ Error: ${errorMessage}`)
       console.error(`⏱️  Failed after: ${duration} seconds`)
       console.error('Full error:', err)
       console.error('================================\n')
       
-      setError(`Failed to import records: ${errorMessage}`)
-      alert(`Failed to import records: ${errorMessage}\n\nDuration: ${duration}s\n\nCheck browser console and backend server logs for details.`)
+      setError(`Failed to ${excelAction === 'update' ? 'update' : 'import'} records: ${errorMessage}`)
+      alert(`Failed to ${excelAction === 'update' ? 'update' : 'import'} records: ${errorMessage}\n\nDuration: ${duration}s\n\nCheck browser console and backend server logs for details.`)
     } finally {
       setLoading(false)
       setImportProgress({
@@ -1947,13 +2037,27 @@ export default function DatabaseManager() {
               <span>Download Template</span>
             </a>
             <label
-              onClick={handleUploadClick}
+              onClick={(event) => handleUploadClick('import', event)}
               className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-green-700 cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span>Upload Excel</span>
+              <span>Upload Excel (Import)</span>
               <input
                 id="excel-upload"
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleExcelUpload}
+                className="hidden"
+              />
+            </label>
+            <label
+              onClick={(event) => handleUploadClick('update', event)}
+              className="bg-amber-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-amber-700 cursor-pointer"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Upload Excel (Bulk Update)</span>
+              <input
+                id="excel-update-upload"
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={handleExcelUpload}
@@ -2835,12 +2939,120 @@ export default function DatabaseManager() {
           </div>
         )}
 
+        {/* Bulk Update Error Modal */}
+        {bulkUpdateErrorModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]">
+            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-5xl w-full mx-4 max-h-[90vh] overflow-auto border-2 border-red-200">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="text-2xl font-bold text-red-700">Bulk Update did not complete, try again</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Please fix required fields and retry upload.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setBulkUpdateErrorModal(null)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <p className="text-xs text-green-800 font-semibold">Updated</p>
+                  <p className="text-2xl font-bold text-green-700">{bulkUpdateErrorModal.updated}</p>
+                </div>
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                  <p className="text-xs text-orange-800 font-semibold">Missing/Invalid</p>
+                  <p className="text-2xl font-bold text-orange-700">{bulkUpdateErrorModal.missingInvalid}</p>
+                </div>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-xs text-red-800 font-semibold">Unique ID Not Matched</p>
+                  <p className="text-2xl font-bold text-red-700">{bulkUpdateErrorModal.notMatched}</p>
+                </div>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs text-blue-800 font-semibold">Time</p>
+                  <p className="text-2xl font-bold text-blue-700">{bulkUpdateErrorModal.duration}s</p>
+                </div>
+              </div>
+
+              <div className="mb-5 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p className="font-semibold text-red-800 mb-3">Essential Fields Missing (highlighted)</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(bulkUpdateErrorModal.essentialMissing).map(([field, count]) => (
+                    <span
+                      key={field}
+                      className={`px-3 py-1 rounded-full text-sm font-semibold border ${
+                        count > 0
+                          ? 'bg-red-100 text-red-800 border-red-300'
+                          : 'bg-gray-100 text-gray-500 border-gray-200'
+                      }`}
+                    >
+                      {field}: {count}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-gray-100 px-4 py-2 font-semibold text-gray-800">Row-wise Error Details</div>
+                <div className="max-h-80 overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left px-3 py-2 border-b">Row</th>
+                        <th className="text-left px-3 py-2 border-b">Unique ID</th>
+                        <th className="text-left px-3 py-2 border-b">Issue</th>
+                        <th className="text-left px-3 py-2 border-b">Missing Fields</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkUpdateErrorModal.issues.map((issue, index) => (
+                        <tr key={`${issue.rowNumber}-${index}`} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 border-b">{issue.rowNumber}</td>
+                          <td className="px-3 py-2 border-b">{issue.uniqueId || '-'}</td>
+                          <td className="px-3 py-2 border-b text-red-700 font-medium">{issue.reason}</td>
+                          <td className="px-3 py-2 border-b">
+                            {issue.missingFields.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {issue.missingFields.map((field) => (
+                                  <span key={field} className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-semibold">
+                                    {field}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => setBulkUpdateErrorModal(null)}
+                  className="bg-red-600 text-white px-5 py-2 rounded-lg hover:bg-red-700"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Excel Preview Modal */}
         {showPreview && excelPreview && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg shadow-xl p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-auto">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-bold">Excel Preview - {excelPreview.fileName}</h3>
+                <h3 className="text-xl font-bold">
+                  {excelAction === 'update' ? 'Bulk Update Preview' : 'Excel Preview'} - {excelPreview.fileName}
+                </h3>
                 <button
                   onClick={() => {
                     setShowPreview(false)
@@ -2867,8 +3079,11 @@ export default function DatabaseManager() {
                 {/* File Info */}
                 <div className="p-3 bg-blue-50 rounded-lg">
                   <div className="text-sm text-gray-700 space-y-1">
+                    <div>
+                      <strong>Action:</strong> {excelAction === 'update' ? 'Bulk update by Unique ID' : 'Import as new records'}
+                    </div>
                     <div><strong>Total rows in file:</strong> {excelPreview.totalRows || excelPreview.rows.length}</div>
-                    <div><strong>Valid rows to import:</strong> {excelPreview.validRows || excelPreview.rows.length}</div>
+                    <div><strong>Valid rows to process:</strong> {excelPreview.validRows || excelPreview.rows.length}</div>
                     {excelPreview.totalRows && excelPreview.totalRows !== excelPreview.validRows && (
                       <div className="text-orange-600">
                         <strong>Note:</strong> {excelPreview.totalRows - excelPreview.validRows} empty rows were excluded
@@ -2881,7 +3096,7 @@ export default function DatabaseManager() {
                   <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
                     <div className="flex items-center justify-between text-sm text-indigo-900 mb-2">
                       <span className="font-medium">
-                        Uploading records: {importProgress.uploadedRecords}/{importProgress.totalRecords}
+                        Processing records: {importProgress.uploadedRecords}/{importProgress.totalRecords}
                       </span>
                       <span>{importProgress.percent}%</span>
                     </div>
@@ -2929,7 +3144,7 @@ export default function DatabaseManager() {
               </div>
 
               <div className="flex space-x-2">
-                {!selectedCategory && (
+                {excelAction === 'import' && !selectedCategory && (
                   <div className="flex-1 p-3 bg-yellow-50 border border-yellow-200 rounded-lg mb-2">
                     <p className="text-sm text-yellow-800">
                       ⚠️ <strong>Note:</strong> No category selected. Select a category above to organize your data.
@@ -2944,10 +3159,14 @@ export default function DatabaseManager() {
                   {loading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Importing...</span>
+                      <span>{excelAction === 'update' ? 'Updating...' : 'Importing...'}</span>
                     </>
                   ) : (
-                    <span>Import All {excelPreview.rows.length} Records</span>
+                    <span>
+                      {excelAction === 'update'
+                        ? `Update ${excelPreview.rows.length} Records by Unique ID`
+                        : `Import All ${excelPreview.rows.length} Records`}
+                    </span>
                   )}
                 </button>
                 <button

@@ -113,5 +113,16 @@ export const databaseService = {
       console.error('Error bulk adding records:', error)
       throw error
     }
+  },
+
+  // Bulk update records by Unique ID
+  async bulkUpdate(records) {
+    try {
+      const result = await apiService.bulkUpdate(records)
+      return result
+    } catch (error) {
+      console.error('Error bulk updating records:', error)
+      throw error
+    }
   }
 }

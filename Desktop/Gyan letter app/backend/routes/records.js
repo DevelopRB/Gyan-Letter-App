@@ -4,6 +4,7 @@ import { pool } from '../db.js'
 const router = express.Router()
 const INSERT_CHUNK_SIZE = 500
 const RESPONSE_PREVIEW_LIMIT = 10
+const UPDATE_CHUNK_SIZE = 500
 
 // Helper function to get the next unique ID (GB-01, GB-02, etc.)
 async function getNextUniqueId() {
@@ -297,6 +298,125 @@ router.post('/bulk', async (req, res) => {
       error: 'Failed to bulk create records',
       details: error.message,
       duration: `${duration}s`
+    })
+  }
+})
+
+// Bulk update records by Unique ID (for Excel custom updates)
+router.post('/bulk-update', async (req, res) => {
+  const startTime = Date.now()
+  const { records } = req.body
+
+  try {
+    if (!Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ error: 'Invalid records format: records must be a non-empty array' })
+    }
+
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+
+      let updatedCount = 0
+      const updatedRecordsPreview = []
+      const skippedRecords = []
+      const notFoundRecords = []
+
+      for (let i = 0; i < records.length; i += UPDATE_CHUNK_SIZE) {
+        const chunk = records.slice(i, i + UPDATE_CHUNK_SIZE)
+
+        for (let j = 0; j < chunk.length; j++) {
+          const item = chunk[j]
+          const index = i + j
+
+          if (!item || typeof item !== 'object') {
+            skippedRecords.push({ index, reason: 'Invalid record format' })
+            continue
+          }
+
+          const uniqueId = String(item['Unique ID'] || '').trim()
+          if (!uniqueId) {
+            skippedRecords.push({ index, reason: 'Missing Unique ID' })
+            continue
+          }
+
+          const { ['Unique ID']: _, ...incomingFields } = item
+          if (Object.keys(incomingFields).length === 0) {
+            skippedRecords.push({ index, uniqueId, reason: 'No fields provided to update' })
+            continue
+          }
+
+          const existingResult = await client.query(
+            `SELECT id, data
+             FROM records
+             WHERE data->>'Unique ID' = $1
+             LIMIT 1`,
+            [uniqueId]
+          )
+
+          if (existingResult.rows.length === 0) {
+            notFoundRecords.push({ index, uniqueId })
+            continue
+          }
+
+          const existing = existingResult.rows[0]
+          const mergedCategoryId = String(incomingFields._categoryId ?? existing.data._categoryId ?? '').trim()
+          const mergedCategoryName = String(incomingFields._categoryName ?? existing.data._categoryName ?? '').trim()
+
+          if (!mergedCategoryId || !mergedCategoryName) {
+            skippedRecords.push({
+              index,
+              uniqueId,
+              reason: 'Missing category id or category name'
+            })
+            continue
+          }
+
+          const mergedData = {
+            ...existing.data,
+            ...incomingFields,
+            _categoryId: mergedCategoryId,
+            _categoryName: mergedCategoryName,
+            'Unique ID': uniqueId
+          }
+
+          const updatedResult = await client.query(
+            'UPDATE records SET data = $1 WHERE id = $2 RETURNING id, data, created_at, updated_at',
+            [JSON.stringify(mergedData), existing.id]
+          )
+
+          if (updatedResult.rows.length > 0) {
+            updatedCount += 1
+            if (updatedRecordsPreview.length < RESPONSE_PREVIEW_LIMIT) {
+              updatedRecordsPreview.push(updatedResult.rows[0])
+            }
+          }
+        }
+      }
+
+      await client.query('COMMIT')
+
+      const durationInSeconds = Math.max((Date.now() - startTime) / 1000, 0.001)
+      res.json({
+        message: `Successfully updated ${updatedCount} records`,
+        count: updatedCount,
+        skipped: skippedRecords.length,
+        notFound: notFoundRecords.length,
+        skippedDetails: skippedRecords.slice(0, 20),
+        notFoundDetails: notFoundRecords.slice(0, 20),
+        recordsPerSecond: parseFloat((updatedCount / durationInSeconds).toFixed(2)),
+        records: updatedRecordsPreview
+      })
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  } catch (error) {
+    console.error('Error bulk updating records:', error)
+    res.status(500).json({
+      error: 'Failed to bulk update records',
+      details: error.message
     })
   }
 })
