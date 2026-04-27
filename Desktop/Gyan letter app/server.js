@@ -2,6 +2,8 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { pool, initDatabase } from './backend/db.js'
 import recordsRoutes from './backend/routes/records.js'
 import authRoutes from './backend/routes/auth.js'
@@ -19,6 +21,8 @@ if (envResult.error) {
 
 const app = express()
 const PORT = process.env.PORT || 5000
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 // Middleware
 // CORS configuration - allow requests from frontend
@@ -96,6 +100,22 @@ app.get('/api/health', async (req, res) => {
     })
   }
 })
+
+// Serve built frontend (single-service deployment on Render)
+const distPath = path.join(__dirname, 'dist')
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+      return next()
+    }
+    return res.sendFile(path.join(distPath, 'index.html'))
+  })
+} else {
+  app.get('/', (req, res) => {
+    res.status(200).send('API is running. Build frontend to serve the web app from this service.')
+  })
+}
 
 // Initialize database on startup
 initDatabase()
