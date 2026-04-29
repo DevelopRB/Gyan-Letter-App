@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import XLSX from 'xlsx'
 import { pool, initDatabase } from './backend/db.js'
 import recordsRoutes from './backend/routes/records.js'
 import authRoutes from './backend/routes/auth.js'
@@ -66,13 +67,53 @@ app.use('/api/records', recordsRoutes)
 
 const CRM_TEMPLATE_FILE_PATH =
   process.env.CRM_TEMPLATE_PATH || 'C:\\Users\\abhis\\Downloads\\CRM template.xlsx'
+const CRM_TEMPLATE_HEADERS = [
+  'Unique ID',
+  'Name',
+  'Department',
+  'Current Role',
+  'Employee Type',
+  'Current Company',
+  'Past Experience',
+  'Date of Joining',
+  'Total Experience',
+  'Experience (Years)',
+  'Designation',
+  'Designation-Category',
+  'Highest Qualification',
+  'Qualified From',
+  'Certifications',
+  'Official Email',
+  'Personal Email',
+  'Mobile',
+  'WhatsApp',
+  'Office Extension',
+  'Office Address',
+  'Profile Link',
+  'Google Scholar',
+  'ResearchGate',
+  'LinkedIn',
+  'ORCID',
+  'Committees',
+  'Additional Roles',
+  'ID Proof',
+  'Certificates',
+  'Status',
+  'File Name',
+]
 
 // Download CRM template as Excel file
 app.get('/api/template-download', (req, res) => {
   try {
     if (!fs.existsSync(CRM_TEMPLATE_FILE_PATH)) {
-      console.error('CRM template file not found:', CRM_TEMPLATE_FILE_PATH)
-      return res.status(404).json({ error: 'CRM template file not found on server' })
+      console.warn('CRM template file not found. Falling back to generated XLSX:', CRM_TEMPLATE_FILE_PATH)
+      const workbook = XLSX.utils.book_new()
+      const worksheet = XLSX.utils.aoa_to_sheet([CRM_TEMPLATE_HEADERS])
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Template')
+      const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      res.setHeader('Content-Disposition', 'attachment; filename="CRM template.xlsx"')
+      return res.status(200).send(excelBuffer)
     }
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
