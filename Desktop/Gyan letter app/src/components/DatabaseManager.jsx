@@ -82,7 +82,20 @@ const REQUIRED_COLUMNS = [
   'File Name'
 ]
 
-const CRM_TEMPLATE_FILE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/template-download`
+const getTemplateDownloadUrl = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return `${import.meta.env.VITE_API_URL}/api/template-download`
+  }
+
+  if (import.meta.env.PROD) {
+    return `${window.location.origin}/api/template-download`
+  }
+
+  // In local development, keep API calls relative so Vite proxy handles /api.
+  return '/api/template-download'
+}
+
+const CRM_TEMPLATE_FILE_URL = getTemplateDownloadUrl()
 const REQUIRED_IMPORT_COLUMNS = REQUIRED_COLUMNS.filter((column) => column !== 'Unique ID')
 const IMPORT_CHUNK_SIZE = 500
 const PREVIEW_ROW_LIMIT = 10
