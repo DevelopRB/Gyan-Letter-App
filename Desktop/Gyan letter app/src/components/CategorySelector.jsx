@@ -217,11 +217,11 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
               </div>
 
               {/* Custom Categories */}
-              {Object.keys(categories).filter(id => !['states', 'universities', 'emails'].includes(id)).length > 0 && (
+              {Object.keys(categories).filter(id => !['default', 'states', 'universities', 'emails'].includes(id)).length > 0 && (
                 <div className="mb-2 border-t pt-2">
                   <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Custom Categories</div>
                   {Object.keys(categories)
-                    .filter(id => !['states', 'universities', 'emails'].includes(id))
+                    .filter(id => !['default', 'states', 'universities', 'emails'].includes(id))
                     .map(catId => {
                       const cat = categories[catId]
                       return (
