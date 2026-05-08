@@ -12,6 +12,11 @@ const DEFAULT_CATEGORIES = {
 }
 
 const PROTECTED_DEFAULT_IDS = ['default', 'states', 'universities', 'emails']
+const CANONICAL_CUSTOM_CATEGORIES = {
+  colleges: { id: 'custom_colleges', name: 'Colleges' },
+  libraries: { id: 'custom_libraries', name: 'Libraries' },
+  institute: { id: 'custom_institute', name: 'Institute' },
+}
 
 const rowsToCategoryMap = (rows) => {
   const categories = {}
@@ -50,11 +55,73 @@ const ensureDefaultCategories = async () => {
   }
 }
 
+const normalizeCustomCategory = (rawName, rawId) => {
+  const normalizedName = String(rawName || '').trim().toLowerCase()
+  const normalizedId = String(rawId || '').trim().toLowerCase()
+  const value = `${normalizedName} ${normalizedId}`
+
+  if (value.includes('librari') || value.includes('librar')) {
+    return CANONICAL_CUSTOM_CATEGORIES.libraries
+  }
+  if (value.includes('institu') || value.includes('institue')) {
+    return CANONICAL_CUSTOM_CATEGORIES.institute
+  }
+  if (value.includes('colleg') || value.includes('collag')) {
+    return CANONICAL_CUSTOM_CATEGORIES.colleges
+  }
+
+  // If no canonical mapping matched, keep existing custom category naming.
+  if (!normalizedName) {
+    return null
+  }
+  const generatedId = normalizedId && normalizedId.startsWith('custom_')
+    ? normalizedId
+    : `custom_${normalizedName.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`
+  return { id: generatedId || `custom_${Date.now()}`, name: String(rawName).trim() }
+}
+
+const ensureCategoriesFromExistingRecords = async () => {
+  const recordsResult = await pool.query(`
+    SELECT DISTINCT data->>'_categoryId' AS category_id, data->>'_categoryName' AS category_name
+    FROM records
+    WHERE data ? '_categoryName'
+      AND COALESCE(data->>'_categoryName', '') <> ''
+  `)
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    for (const row of recordsResult.rows) {
+      const category = normalizeCustomCategory(row.category_name, row.category_id)
+      if (!category) continue
+      if (PROTECTED_DEFAULT_IDS.includes(category.id)) continue
+
+      await client.query(
+        `
+        INSERT INTO categories (id, name, type, items)
+        SELECT $1, $2, 'custom', '[]'::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1 FROM categories WHERE id = $1 OR LOWER(name) = LOWER($2)
+        )
+        `,
+        [category.id, category.name]
+      )
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 router.use(authenticateToken)
 
 router.get('/', async (req, res) => {
   try {
     await ensureDefaultCategories()
+    await ensureCategoriesFromExistingRecords()
     const result = await pool.query(
       'SELECT id, name, type, items, created_at, updated_at FROM categories ORDER BY created_at ASC'
     )
