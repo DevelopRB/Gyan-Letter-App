@@ -122,7 +122,7 @@ export async function initDatabase() {
     const requiredCustomCategories = [
       { id: 'custom_colleges', name: 'Colleges' },
       { id: 'custom_libraries', name: 'Libraries' },
-      { id: 'custom_institutes', name: 'Institutes' },
+      { id: 'custom_institute', name: 'Institute' },
     ]
 
     for (const category of requiredCustomCategories) {
@@ -138,23 +138,26 @@ export async function initDatabase() {
       )
     }
 
-    // Backfill legacy records so existing uploaded data points to the synchronized categories.
-    // Handles common name variations and typo "Librarires".
+    // Backfill legacy records so existing uploaded data points to synchronized categories.
+    // Handles common ID and name variations (including typos).
     const recordCategoryMappings = [
       {
         id: 'custom_libraries',
         name: 'Libraries',
-        aliases: ['libraries', 'librarires', 'library'],
+        nameAliases: ['libraries', 'librarires', 'library', 'librarie'],
+        idAliases: ['custom_libraries', 'custom_library', 'custom_librarires'],
       },
       {
-        id: 'custom_institutes',
-        name: 'Institutes',
-        aliases: ['institutes', 'institute'],
+        id: 'custom_institute',
+        name: 'Institute',
+        nameAliases: ['institutes', 'institute', 'institue'],
+        idAliases: ['custom_institute', 'custom_institutes', 'custom_institue'],
       },
       {
         id: 'custom_colleges',
         name: 'Colleges',
-        aliases: ['colleges', 'college'],
+        nameAliases: ['colleges', 'college', 'collegs', 'collage'],
+        idAliases: ['custom_colleges', 'custom_college', 'custom_collegs'],
       },
     ]
 
@@ -169,8 +172,24 @@ export async function initDatabase() {
           true
         )
         WHERE LOWER(COALESCE(data->>'_categoryName', '')) = ANY($3::text[])
+           OR LOWER(COALESCE(data->>'_categoryId', '')) = ANY($4::text[])
         `,
-        [mapping.id, mapping.name, mapping.aliases]
+        [mapping.id, mapping.name, mapping.nameAliases, mapping.idAliases]
+      )
+    }
+
+    // Remove duplicate custom category rows that represent the same logical category.
+    for (const mapping of recordCategoryMappings) {
+      await pool.query(
+        `
+        DELETE FROM categories
+        WHERE id <> $1
+          AND (
+            LOWER(name) = ANY($2::text[])
+            OR LOWER(id) = ANY($3::text[])
+          )
+        `,
+        [mapping.id, mapping.nameAliases, mapping.idAliases]
       )
     }
 
