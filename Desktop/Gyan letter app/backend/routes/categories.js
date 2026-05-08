@@ -129,9 +129,9 @@ const ensureCategoriesFromExistingRecords = async () => {
       await client.query(
         `
         INSERT INTO categories (id, name, type, items)
-        SELECT $1, $2, 'custom', '[]'::jsonb
+        SELECT $1::varchar, $2::varchar, 'custom', '[]'::jsonb
         WHERE NOT EXISTS (
-          SELECT 1 FROM categories WHERE id = $1 OR LOWER(name) = LOWER($2)
+          SELECT 1 FROM categories WHERE id = $1::varchar OR LOWER(name) = LOWER($2::varchar)
         )
         `,
         [category.id, category.name]
