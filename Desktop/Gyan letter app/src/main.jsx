@@ -3,6 +3,14 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
 
+const CANONICAL_HOST = 'gyan-letter-app.onrender.com'
+const LEGACY_HOSTS = ['gyan-letter-app-1.onrender.com']
+
+if (import.meta.env.PROD && LEGACY_HOSTS.includes(window.location.hostname)) {
+  const targetUrl = `https://${CANONICAL_HOST}${window.location.pathname}${window.location.search}${window.location.hash}`
+  window.location.replace(targetUrl)
+}
+
 // Suppress findDOMNode warnings from ReactQuill (known issue with react-quill v2.0.0)
 // This is a harmless warning from the library's internal code
 const originalWarn = console.warn

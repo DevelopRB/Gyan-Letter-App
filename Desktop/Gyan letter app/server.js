@@ -31,7 +31,7 @@ const __dirname = path.dirname(__filename)
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173', // Vite default port
-  'https://gyan-letter-app-1.onrender.com', // Render frontend URL
+  'https://gyan-letter-app.onrender.com', // Canonical Render frontend URL
   process.env.FRONTEND_URL, // Additional frontend URL from env
 ].filter(Boolean) // Remove undefined values
 
