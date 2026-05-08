@@ -117,6 +117,63 @@ export async function initDatabase() {
       EXECUTE FUNCTION update_updated_at_column();
     `)
 
+    // Ensure commonly used legacy custom categories exist after deployment.
+    // This keeps historical data aligned for users who previously relied on local-only categories.
+    const requiredCustomCategories = [
+      { id: 'custom_colleges', name: 'Colleges' },
+      { id: 'custom_libraries', name: 'Libraries' },
+      { id: 'custom_institutes', name: 'Institutes' },
+    ]
+
+    for (const category of requiredCustomCategories) {
+      await pool.query(
+        `
+        INSERT INTO categories (id, name, type, items)
+        SELECT $1::varchar, $2::varchar, 'custom', '[]'::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1 FROM categories WHERE LOWER(name) = LOWER($2::varchar)
+        )
+        `,
+        [category.id, category.name]
+      )
+    }
+
+    // Backfill legacy records so existing uploaded data points to the synchronized categories.
+    // Handles common name variations and typo "Librarires".
+    const recordCategoryMappings = [
+      {
+        id: 'custom_libraries',
+        name: 'Libraries',
+        aliases: ['libraries', 'librarires', 'library'],
+      },
+      {
+        id: 'custom_institutes',
+        name: 'Institutes',
+        aliases: ['institutes', 'institute'],
+      },
+      {
+        id: 'custom_colleges',
+        name: 'Colleges',
+        aliases: ['colleges', 'college'],
+      },
+    ]
+
+    for (const mapping of recordCategoryMappings) {
+      await pool.query(
+        `
+        UPDATE records
+        SET data = jsonb_set(
+          jsonb_set(data, '{_categoryId}', to_jsonb($1::text), true),
+          '{_categoryName}',
+          to_jsonb($2::text),
+          true
+        )
+        WHERE LOWER(COALESCE(data->>'_categoryName', '')) = ANY($3::text[])
+        `,
+        [mapping.id, mapping.name, mapping.aliases]
+      )
+    }
+
     console.log('Database schema initialized successfully')
   } catch (error) {
     console.error('Error initializing database:', error)
