@@ -11,16 +11,6 @@ const getDefaultCategories = () => ({
 
 let categoriesCache = null
 
-const readLocalCategories = () => {
-  try {
-    const categories = localStorage.getItem(CATEGORIES_KEY)
-    return categories ? JSON.parse(categories) : null
-  } catch (error) {
-    console.error('Error loading categories from localStorage:', error)
-    return null
-  }
-}
-
 const saveLocalCategories = (categories) => {
   try {
     localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories))
@@ -43,7 +33,7 @@ export const categoryService = {
     if (categoriesCache) {
       return categoriesCache
     }
-    categoriesCache = ensureDefaults(readLocalCategories())
+    categoriesCache = getDefaultCategories()
     return categoriesCache
   },
 
@@ -55,11 +45,16 @@ export const categoryService = {
   },
 
   async initialize() {
-    this.getAll()
+    if (!categoriesCache) {
+      categoriesCache = getDefaultCategories()
+    }
     try {
       await this.loadFromServer()
     } catch (error) {
-      console.warn('Category server sync failed, using local cache:', error.message)
+      // Never hydrate custom categories from browser-local storage.
+      // Shared backend is the source of truth for cross-system consistency.
+      console.warn('Category server sync failed, using defaults only:', error.message)
+      categoriesCache = getDefaultCategories()
     }
     return this.getAll()
   },
