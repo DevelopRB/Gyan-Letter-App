@@ -52,6 +52,16 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
     setCategories(cats)
   }
 
+  const refreshCategoriesFromServer = async () => {
+    try {
+      await categoryService.loadFromServer()
+    } catch (error) {
+      console.warn('Category refresh failed, using cached categories:', error.message)
+    } finally {
+      loadCategories()
+    }
+  }
+
   const handleCategorySelect = (categoryId) => {
     const category = categories[categoryId]
     if (category) {
@@ -128,6 +138,20 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
   }
 
   const selectedCategoryData = selectedCategory ? categories[selectedCategory] : null
+
+  useEffect(() => {
+    if (showDropdown) {
+      refreshCategoriesFromServer()
+    }
+  }, [showDropdown])
+
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      refreshCategoriesFromServer()
+    }
+    window.addEventListener('focus', handleWindowFocus)
+    return () => window.removeEventListener('focus', handleWindowFocus)
+  }, [])
 
   return (
     <div className="mb-6">
