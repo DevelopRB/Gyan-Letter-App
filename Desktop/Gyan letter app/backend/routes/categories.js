@@ -32,6 +32,36 @@ const rowsToCategoryMap = (rows) => {
   return categories
 }
 
+const mergeCategoriesFromRecords = async (categoriesMap) => {
+  const recordsResult = await pool.query(`
+    SELECT DISTINCT data->>'_categoryId' AS category_id, data->>'_categoryName' AS category_name
+    FROM records
+    WHERE data ? '_categoryName'
+      AND COALESCE(data->>'_categoryName', '') <> ''
+  `)
+
+  for (const row of recordsResult.rows) {
+    const category = normalizeCustomCategory(row.category_name, row.category_id)
+    if (!category) continue
+    if (PROTECTED_DEFAULT_IDS.includes(category.id)) continue
+
+    const existingById = categoriesMap[category.id]
+    const existingByName = Object.values(categoriesMap).find(
+      (item) => String(item.name || '').toLowerCase() === String(category.name).toLowerCase()
+    )
+
+    if (!existingById && !existingByName) {
+      categoriesMap[category.id] = {
+        name: category.name,
+        type: 'custom',
+        items: [],
+      }
+    }
+  }
+
+  return categoriesMap
+}
+
 const ensureDefaultCategories = async () => {
   const client = await pool.connect()
   try {
@@ -125,7 +155,9 @@ router.get('/', async (req, res) => {
     const result = await pool.query(
       'SELECT id, name, type, items, created_at, updated_at FROM categories ORDER BY created_at ASC'
     )
-    return res.json(rowsToCategoryMap(result.rows))
+    const categoriesMap = rowsToCategoryMap(result.rows)
+    const mergedMap = await mergeCategoriesFromRecords(categoriesMap)
+    return res.json(mergedMap)
   } catch (error) {
     console.error('Error fetching categories:', error)
     return res.status(500).json({ error: 'Failed to fetch categories' })
