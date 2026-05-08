@@ -182,7 +182,11 @@ export default function DatabaseManager() {
   })
 
   useEffect(() => {
-    loadRecords()
+    const initializePage = async () => {
+      await categoryService.initialize()
+      await loadRecords()
+    }
+    initializePage()
   }, [])
 
   useEffect(() => {
@@ -1108,7 +1112,7 @@ export default function DatabaseManager() {
       }
       // Create new category
       try {
-        categoryId = categoryService.addCategory(saveModalNewCategoryName.trim(), 'custom')
+        categoryId = await categoryService.addCategory(saveModalNewCategoryName.trim(), 'custom')
         categoryName = saveModalNewCategoryName.trim()
       } catch (err) {
         alert('Failed to create category. Please try again.')

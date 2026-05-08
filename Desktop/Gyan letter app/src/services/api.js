@@ -160,5 +160,51 @@ export const apiService = {
     const response = await fetch(`${API_BASE_URL}/health`)
     return response.json()
   },
+
+  // Categories
+  async getCategories() {
+    const response = await fetch(`${API_BASE_URL}/categories`, {
+      headers: getHeaders(),
+    })
+    if (!response.ok) {
+      throw new Error('Failed to fetch categories')
+    }
+    return response.json()
+  },
+
+  async createCategory(name, type = 'custom') {
+    const response = await fetch(`${API_BASE_URL}/categories`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ name, type }),
+    })
+    if (!response.ok) {
+      throw new Error('Failed to create category')
+    }
+    return response.json()
+  },
+
+  async renameCategory(categoryId, name) {
+    const response = await fetch(`${API_BASE_URL}/categories/${categoryId}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ name }),
+    })
+    if (!response.ok) {
+      throw new Error('Failed to rename category')
+    }
+    return response.json()
+  },
+
+  async deleteCategory(categoryId) {
+    const response = await fetch(`${API_BASE_URL}/categories/${categoryId}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    })
+    if (!response.ok) {
+      throw new Error('Failed to delete category')
+    }
+    return response.json()
+  },
 }
 

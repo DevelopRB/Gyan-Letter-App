@@ -1,0 +1,150 @@
+import express from 'express'
+import { pool } from '../db.js'
+import { authenticateToken } from '../middleware/auth.js'
+
+const router = express.Router()
+
+const DEFAULT_CATEGORIES = {
+  default: { name: 'Default', type: 'default', items: [] },
+  states: { name: 'Indian States', type: 'states', items: [] },
+  universities: { name: 'Universities', type: 'universities', items: [] },
+  emails: { name: 'Complete Mails', type: 'emails', items: [] }
+}
+
+const PROTECTED_DEFAULT_IDS = ['default', 'states', 'universities', 'emails']
+
+const rowsToCategoryMap = (rows) => {
+  const categories = {}
+  rows.forEach((row) => {
+    categories[row.id] = {
+      name: row.name,
+      type: row.type,
+      items: Array.isArray(row.items) ? row.items : [],
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
+      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
+    }
+  })
+  return categories
+}
+
+const ensureDefaultCategories = async () => {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    for (const [id, category] of Object.entries(DEFAULT_CATEGORIES)) {
+      await client.query(
+        `
+        INSERT INTO categories (id, name, type, items)
+        VALUES ($1, $2, $3, $4::jsonb)
+        ON CONFLICT (id) DO NOTHING
+        `,
+        [id, category.name, category.type, JSON.stringify(category.items)]
+      )
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+router.use(authenticateToken)
+
+router.get('/', async (req, res) => {
+  try {
+    await ensureDefaultCategories()
+    const result = await pool.query(
+      'SELECT id, name, type, items, created_at, updated_at FROM categories ORDER BY created_at ASC'
+    )
+    return res.json(rowsToCategoryMap(result.rows))
+  } catch (error) {
+    console.error('Error fetching categories:', error)
+    return res.status(500).json({ error: 'Failed to fetch categories' })
+  }
+})
+
+router.post('/', async (req, res) => {
+  try {
+    const { name, type = 'custom' } = req.body
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Category name is required' })
+    }
+
+    const newId = `custom_${Date.now()}`
+    const trimmedName = String(name).trim()
+    const result = await pool.query(
+      `
+      INSERT INTO categories (id, name, type, items)
+      VALUES ($1, $2, $3, '[]'::jsonb)
+      RETURNING id, name, type, items, created_at, updated_at
+      `,
+      [newId, trimmedName, type]
+    )
+
+    const created = result.rows[0]
+    return res.status(201).json({
+      id: created.id,
+      category: {
+        name: created.name,
+        type: created.type,
+        items: Array.isArray(created.items) ? created.items : [],
+        createdAt: new Date(created.created_at).toISOString(),
+        updatedAt: created.updated_at ? new Date(created.updated_at).toISOString() : undefined,
+      },
+    })
+  } catch (error) {
+    console.error('Error creating category:', error)
+    return res.status(500).json({ error: 'Failed to create category' })
+  }
+})
+
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { name } = req.body
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Category name is required' })
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE categories
+      SET name = $1
+      WHERE id = $2
+      RETURNING id
+      `,
+      [String(name).trim(), id]
+    )
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Category not found' })
+    }
+
+    return res.json({ success: true })
+  } catch (error) {
+    console.error('Error renaming category:', error)
+    return res.status(500).json({ error: 'Failed to rename category' })
+  }
+})
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    if (PROTECTED_DEFAULT_IDS.includes(id)) {
+      return res.status(400).json({ error: 'Cannot delete default category' })
+    }
+
+    const result = await pool.query('DELETE FROM categories WHERE id = $1', [id])
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Category not found' })
+    }
+    return res.json({ success: true })
+  } catch (error) {
+    console.error('Error deleting category:', error)
+    return res.status(500).json({ error: 'Failed to delete category' })
+  }
+})
+
+export default router

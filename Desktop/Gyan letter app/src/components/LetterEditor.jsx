@@ -47,9 +47,13 @@ export default function LetterEditor() {
   
 
   useEffect(() => {
-    loadRecords()
-    loadTemplates()
-    loadDrafts()
+    const initializeEditor = async () => {
+      await categoryService.initialize()
+      await loadRecords()
+      loadTemplates()
+      loadDrafts()
+    }
+    initializeEditor()
   }, [])
 
   // Auto-save draft every 30 seconds

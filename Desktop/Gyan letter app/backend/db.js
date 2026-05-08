@@ -57,9 +57,26 @@ export async function initDatabase() {
       )
     `)
 
+    // Create categories table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        type VARCHAR(100) NOT NULL DEFAULT 'custom',
+        items JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+
     // Create index on JSONB data for better query performance
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_records_data_gin ON records USING GIN (data)
+    `)
+
+    // Create index on category type for faster filtering
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type)
     `)
 
     // Create function to update updated_at timestamp
@@ -87,6 +104,15 @@ export async function initDatabase() {
       DROP TRIGGER IF EXISTS update_records_updated_at ON records;
       CREATE TRIGGER update_records_updated_at
       BEFORE UPDATE ON records
+      FOR EACH ROW
+      EXECUTE FUNCTION update_updated_at_column();
+    `)
+
+    // Create trigger to auto-update updated_at for categories
+    await pool.query(`
+      DROP TRIGGER IF EXISTS update_categories_updated_at ON categories;
+      CREATE TRIGGER update_categories_updated_at
+      BEFORE UPDATE ON categories
       FOR EACH ROW
       EXECUTE FUNCTION update_updated_at_column();
     `)

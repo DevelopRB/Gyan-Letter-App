@@ -14,7 +14,11 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
   const buttonRef = useRef(null)
 
   useEffect(() => {
-    loadCategories()
+    const initCategories = async () => {
+      await categoryService.initialize()
+      loadCategories()
+    }
+    initCategories()
   }, [])
 
   // Handle click outside to close dropdown
@@ -37,6 +41,12 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
     }
   }, [showDropdown])
 
+  useEffect(() => {
+    if (showAddModal || showRenameModal) {
+      setShowDropdown(false)
+    }
+  }, [showAddModal, showRenameModal])
+
   const loadCategories = () => {
     const cats = categoryService.getAll()
     setCategories(cats)
@@ -51,45 +61,58 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
     }
   }
 
-  const handleAddCategory = () => {
+  const handleAddCategory = async () => {
     if (!newCategoryName.trim()) {
       alert('Please enter a category name')
       return
     }
 
-    const categoryId = categoryService.addCategory(newCategoryName.trim(), categoryType)
-    loadCategories()
-    setNewCategoryName('')
-    setShowAddModal(false)
-    setCategoryType('custom')
-    
-    // Auto-select the new category
-    handleCategorySelect(categoryId)
+    try {
+      const categoryId = await categoryService.addCategory(newCategoryName.trim(), categoryType)
+      loadCategories()
+      setNewCategoryName('')
+      setShowAddModal(false)
+      setCategoryType('custom')
+      handleCategorySelect(categoryId)
+    } catch (error) {
+      console.error('Failed to add category:', error)
+      alert('Failed to add category. Please try again.')
+    }
   }
 
-  const handleRenameCategory = () => {
+  const handleRenameCategory = async () => {
     if (!newCategoryName.trim()) {
       alert('Please enter a new name')
       return
     }
 
-    if (categoryService.renameCategory(editingCategoryId, newCategoryName.trim())) {
+    try {
+      await categoryService.renameCategory(editingCategoryId, newCategoryName.trim())
       loadCategories()
       setNewCategoryName('')
       setShowRenameModal(false)
       setEditingCategoryId(null)
+    } catch (error) {
+      console.error('Failed to rename category:', error)
+      alert('Failed to rename category. Please try again.')
     }
   }
 
-  const handleDeleteCategory = (categoryId) => {
+  const handleDeleteCategory = async (categoryId) => {
     if (window.confirm('Are you sure you want to delete this category?')) {
-      if (categoryService.deleteCategory(categoryId)) {
+      try {
+        const success = await categoryService.deleteCategory(categoryId)
+        if (!success) {
+          alert('Cannot delete default categories')
+          return
+        }
         loadCategories()
         if (selectedCategory === categoryId) {
           onCategoryChange(null)
         }
-      } else {
-        alert('Cannot delete default categories')
+      } catch (error) {
+        console.error('Failed to delete category:', error)
+        alert('Failed to delete category. Please try again.')
       }
     }
   }
@@ -97,6 +120,7 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
   const openRenameModal = (categoryId) => {
     const category = categories[categoryId]
     if (category) {
+      setShowDropdown(false)
       setEditingCategoryId(categoryId)
       setNewCategoryName(category.name)
       setShowRenameModal(true)
@@ -134,7 +158,7 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
           <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${showDropdown ? 'transform rotate-180' : ''}`} />
         </button>
 
-        {showDropdown && (
+        {showDropdown && !showAddModal && !showRenameModal && (
           <div 
             ref={dropdownRef}
             className="absolute z-[9999] w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-xl max-h-96 overflow-auto"
@@ -244,7 +268,7 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
 
       {/* Add Category Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Add New Category</h3>
             <div className="mb-4">
@@ -295,7 +319,7 @@ export default function CategorySelector({ selectedCategory, onCategoryChange, o
 
       {/* Rename Category Modal */}
       {showRenameModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Rename Category</h3>
             <div className="mb-4">
