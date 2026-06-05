@@ -12,6 +12,20 @@ const transformRecord = (apiRecord) => {
 }
 
 export const databaseService = {
+  // Get paginated records
+  async getPaginated({ search = '', page = 1, limit = 100, categoryId = '' } = {}) {
+    try {
+      const result = await apiService.getRecordsPage({ search, page, limit, categoryId })
+      return {
+        ...result,
+        records: (result.records || []).map(transformRecord)
+      }
+    } catch (error) {
+      console.error('Error fetching paginated records:', error)
+      throw error
+    }
+  },
+
   // Get all records
   async getAll() {
     try {
@@ -75,8 +89,8 @@ export const databaseService = {
   // Search records
   async search(query) {
     try {
-      const records = await apiService.getAll(query)
-      return records.map(transformRecord)
+      const result = await this.getPaginated({ search: query, page: 1, limit: 100 })
+      return result.records
     } catch (error) {
       console.error('Error searching records:', error)
       throw error

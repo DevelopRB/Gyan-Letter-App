@@ -162,6 +162,8 @@ export default function DatabaseManager() {
   const [saveModalNewCategoryName, setSaveModalNewCategoryName] = useState('')
   const [rowsPerPage, setRowsPerPage] = useState(50)
   const [currentPage, setCurrentPage] = useState(1)
+  const [serverTotalRecords, setServerTotalRecords] = useState(0)
+  const [serverTotalPages, setServerTotalPages] = useState(1)
   const [importProgress, setImportProgress] = useState({
     currentChunk: 0,
     totalChunks: 0,
@@ -184,47 +186,39 @@ export default function DatabaseManager() {
   useEffect(() => {
     const initializePage = async () => {
       await categoryService.initialize()
-      await loadRecords()
     }
     initializePage()
   }, [])
 
   useEffect(() => {
     applyFiltersAndSort()
-  }, [records, searchQuery, sortConfig, filters, selectedCategory])
+  }, [records, sortConfig, filters])
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [rowsPerPage, selectedCategory, searchQuery, filters, sortConfig])
+  }, [rowsPerPage, selectedCategory, searchQuery])
 
   useEffect(() => {
-    const trimmedQuery = searchQuery.trim().toLowerCase()
-    if (!trimmedQuery) return
-
-    // Auto-navigate to the matching record's category when searching.
-    const matchingRecord = records.find((record) => {
-      if (record['Unique ID'] && String(record['Unique ID']).toLowerCase().includes(trimmedQuery)) {
-        return true
-      }
-      return Object.values(record).some((value) =>
-        String(value ?? '').toLowerCase().includes(trimmedQuery)
-      )
-    })
-
-    if (!matchingRecord) return
-
-    const targetCategoryId = matchingRecord._categoryId || '_uncategorized'
-    if (targetCategoryId !== selectedCategory) {
-      handleCategoryChange(targetCategoryId)
-    }
-  }, [searchQuery, records, selectedCategory])
+    const timeoutId = setTimeout(() => {
+      loadRecords()
+    }, 250)
+    return () => clearTimeout(timeoutId)
+  }, [currentPage, rowsPerPage, selectedCategory, searchQuery])
 
   const loadRecords = async () => {
     setLoading(true)
     setError(null)
     try {
-      const data = await databaseService.search(searchQuery)
-      setRecords(data)
+      const categoryIdParam = selectedCategory || ''
+      const response = await databaseService.getPaginated({
+        search: searchQuery.trim(),
+        page: currentPage,
+        limit: rowsPerPage,
+        categoryId: categoryIdParam
+      })
+      setRecords(response.records || [])
+      setServerTotalRecords(response.total || 0)
+      setServerTotalPages(response.totalPages || 1)
     } catch (err) {
       setError('Failed to load records. Please check if the server is running.')
       console.error('Error loading records:', err)
@@ -235,43 +229,6 @@ export default function DatabaseManager() {
 
   const applyFiltersAndSort = () => {
     let result = [...records]
-
-    // Apply category filter - only show records matching the selected category
-    if (selectedCategory) {
-      // Special pseudo-category for uncategorized records
-      if (selectedCategory === '_uncategorized') {
-        result = result.filter(record => !record._categoryId)
-      } else {
-        result = result.filter(record => {
-          // Check if record has category info
-          const recordCategoryId = record._categoryId
-          if (!recordCategoryId) {
-            // If record has no category, don't show it when a specific category is selected
-            return false
-          }
-          // Match category ID
-          return recordCategoryId === selectedCategory
-        })
-      }
-    } else {
-      // If no category selected, show all records (including those without categories)
-      // But if user wants to see only categorized records, they can select a category
-    }
-
-    // Apply search
-    if (searchQuery) {
-      const lowerQuery = searchQuery.toLowerCase()
-      result = result.filter(record => {
-        // Prioritize Unique ID search - exact match or partial match
-        if (record['Unique ID'] && String(record['Unique ID']).toLowerCase().includes(lowerQuery)) {
-          return true
-        }
-        // Also search in all other fields
-        return Object.values(record).some(value => 
-          String(value).toLowerCase().includes(lowerQuery)
-        )
-      })
-    }
 
     // Apply filters
     Object.keys(filters).forEach(field => {
@@ -760,6 +717,7 @@ export default function DatabaseManager() {
           previewRows,
           rows: allRows,
           fileName: file.name,
+          fileSizeBytes: file.size || 0,
           totalRows: totalRowsInSheet - 1, // Subtract header row
           validRows: allRows.length
         })
@@ -879,6 +837,9 @@ export default function DatabaseManager() {
     console.log(`\n=== FRONTEND: Starting ${actionLabel} ===`)
     console.log(`📊 Records to process: ${excelPreview.rows.length}`)
     console.log(`📋 Headers: ${excelPreview.headers.length}`)
+    if (excelPreview.fileSizeBytes) {
+      console.log(`📁 File size: ${(excelPreview.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB`)
+    }
     console.log(`⏰ Start time: ${new Date().toLocaleTimeString()}`)
     
     try {
@@ -892,6 +853,7 @@ export default function DatabaseManager() {
       const validationIssues = []
       const totalRows = excelPreview.rows.length
       const totalChunks = Math.ceil(totalRows / IMPORT_CHUNK_SIZE)
+      console.log(`🧩 Total chunks: ${totalChunks}`)
       const categories = categoryService.getAll()
       const defaultCategory = categories.default || { name: 'Default' }
       const categoryIdToUse = selectedCategory || 'default'
@@ -1611,11 +1573,8 @@ export default function DatabaseManager() {
   }
 
   const allFieldNames = getFieldNames()
-  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / rowsPerPage))
-  const paginatedFilteredRecords = filteredRecords.slice(
-    (currentPage - 1) * rowsPerPage,
-    currentPage * rowsPerPage
-  )
+  const totalPages = Math.max(1, serverTotalPages)
+  const paginatedFilteredRecords = filteredRecords
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -3605,7 +3564,7 @@ export default function DatabaseManager() {
         <div className="mt-8 pt-6 border-t border-gray-300">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-4 text-sm text-gray-500">
-              <span>Total records: {records.length}</span>
+              <span>Total records: {serverTotalRecords}</span>
               {selectedCategory && (
                 <span className="text-blue-600 font-medium">
                   Category: {selectedCategoryData?.name}
@@ -3613,21 +3572,21 @@ export default function DatabaseManager() {
               )}
               {filteredRecords.length !== records.length && (
                 <span className="text-green-600">
-                  Showing: {paginatedFilteredRecords.length} of {filteredRecords.length} filtered records
+                  Showing: {paginatedFilteredRecords.length} of {serverTotalRecords} filtered records (current page)
                 </span>
               )}
               {filteredRecords.length === records.length && filteredRecords.length > 0 && (
                 <span className="text-green-600">
-                  Showing: {paginatedFilteredRecords.length} of {filteredRecords.length} records
+                  Showing: {paginatedFilteredRecords.length} of {serverTotalRecords} records
                 </span>
               )}
-              {filteredRecords.length > 0 && (
+              {serverTotalRecords > 0 && (
                 <span className="text-gray-600">
                   Showing page {currentPage} of {totalPages}
                 </span>
               )}
             </div>
-            {filteredRecords.length > rowsPerPage && (
+            {serverTotalRecords > rowsPerPage && (
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}

@@ -180,3 +180,13 @@ if (!process.env.VERCEL) {
   })
 }
 
+// Log memory usage periodically to catch leaks/spikes on small instances.
+setInterval(() => {
+  const mem = process.memoryUsage()
+  console.log('[Memory]', {
+    rss: `${Math.round(mem.rss / 1024 / 1024)} MB`,
+    heapUsed: `${Math.round(mem.heapUsed / 1024 / 1024)} MB`,
+    heapTotal: `${Math.round(mem.heapTotal / 1024 / 1024)} MB`
+  })
+}, 30000)
+

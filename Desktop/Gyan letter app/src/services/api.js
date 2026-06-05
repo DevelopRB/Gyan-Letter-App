@@ -33,11 +33,14 @@ const getHeaders = () => {
 }
 
 export const apiService = {
-  // Get all records
-  async getAll(search = '') {
-    const url = search 
-      ? `${API_BASE_URL}/records?search=${encodeURIComponent(search)}`
-      : `${API_BASE_URL}/records`
+  // Get paginated records
+  async getRecordsPage({ search = '', page = 1, limit = 100, categoryId = '' } = {}) {
+    const params = new URLSearchParams()
+    params.set('page', String(page))
+    params.set('limit', String(limit))
+    if (search) params.set('search', search)
+    if (categoryId) params.set('categoryId', categoryId)
+    const url = `${API_BASE_URL}/records?${params.toString()}`
     
     const response = await fetch(url, {
       headers: getHeaders(),
@@ -46,6 +49,23 @@ export const apiService = {
       throw new Error('Failed to fetch records')
     }
     return response.json()
+  },
+
+  // Backward compatible all-records fetch (legacy screens)
+  async getAll(search = '') {
+    const limit = 500
+    let page = 1
+    let totalPages = 1
+    const allRecords = []
+
+    do {
+      const result = await this.getRecordsPage({ search, page, limit })
+      allRecords.push(...(result.records || []))
+      totalPages = result.totalPages || 1
+      page += 1
+    } while (page <= totalPages)
+
+    return allRecords
   },
 
   // Get a single record

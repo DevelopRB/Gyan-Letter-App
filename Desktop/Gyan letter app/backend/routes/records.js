@@ -46,29 +46,60 @@ async function getNextUniqueId() {
 // Get all records
 router.get('/', async (req, res) => {
   try {
-    const { search } = req.query
-    let query = 'SELECT id, data, created_at, updated_at FROM records'
+    const { search, categoryId } = req.query
+    const parsedPage = parseInt(req.query.page, 10)
+    const parsedLimit = parseInt(req.query.limit, 10)
+    const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 500) : 100
+    const offset = (page - 1) * limit
+    const conditions = []
     const params = []
 
     if (search) {
-      // Search in JSONB data using PostgreSQL's JSONB operators
-      // Prioritize Unique ID field for exact/partial matches
-      query += ` WHERE (data->>'Unique ID' ILIKE $1 OR data::text ILIKE $1)`
       params.push(`%${search}%`)
+      conditions.push(`(data->>'Unique ID' ILIKE $${params.length} OR data::text ILIKE $${params.length})`)
     }
 
-    // Sort by Unique ID if available, otherwise by creation date
-    // Extract numeric part from Unique ID for proper numeric sorting
-    query += ` ORDER BY 
-      CASE 
-        WHEN data->>'Unique ID' IS NOT NULL AND data->>'Unique ID' ~ '^GB-\\d+$' 
-        THEN CAST(SUBSTRING(data->>'Unique ID' FROM 'GB-(\\d+)') AS INTEGER)
-        ELSE 999999
-      END ASC,
-      created_at DESC`
+    if (categoryId) {
+      if (categoryId === '_uncategorized') {
+        conditions.push(`(data->>'_categoryId' IS NULL OR TRIM(COALESCE(data->>'_categoryId', '')) = '')`)
+      } else {
+        params.push(categoryId)
+        conditions.push(`data->>'_categoryId' = $${params.length}`)
+      }
+    }
 
-    const result = await pool.query(query, params)
-    res.json(result.rows)
+    const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : ''
+    const countQuery = `SELECT COUNT(*)::int AS total FROM records${whereClause}`
+    const countResult = await pool.query(countQuery, params)
+    const total = countResult.rows[0]?.total ?? 0
+    const totalPages = Math.max(1, Math.ceil(total / limit))
+
+    const dataParams = [...params]
+    dataParams.push(limit)
+    const limitParam = `$${dataParams.length}`
+    dataParams.push(offset)
+    const offsetParam = `$${dataParams.length}`
+
+    const dataQuery = `SELECT id, data, created_at, updated_at FROM records${whereClause}
+      ORDER BY
+        CASE
+          WHEN data->>'Unique ID' IS NOT NULL AND data->>'Unique ID' ~ '^GB-\\d+$'
+          THEN CAST(SUBSTRING(data->>'Unique ID' FROM 'GB-(\\d+)') AS INTEGER)
+          ELSE 999999
+        END ASC,
+        created_at DESC
+      LIMIT ${limitParam}
+      OFFSET ${offsetParam}`
+
+    const result = await pool.query(dataQuery, dataParams)
+    res.json({
+      records: result.rows,
+      total,
+      page,
+      limit,
+      totalPages
+    })
   } catch (error) {
     console.error('Error fetching records:', error)
     res.status(500).json({ error: 'Failed to fetch records' })
@@ -129,6 +160,14 @@ router.post('/bulk', async (req, res) => {
 
   console.log('\n=== BULK IMPORT STARTED ===')
   console.log(`📥 Received ${records?.length || 0} records to import`)
+  const payloadBytes = Number(req.headers['content-length'] || 0)
+  if (payloadBytes > 0) {
+    console.log(`📦 Request payload size: ${(payloadBytes / (1024 * 1024)).toFixed(2)} MB`)
+  }
+  if (Array.isArray(records) && records.length > 0) {
+    const importChunkCount = Math.ceil(records.length / INSERT_CHUNK_SIZE)
+    console.log(`🧩 Estimated chunk count: ${importChunkCount}`)
+  }
   console.log(`⏰ Start time: ${new Date().toISOString()}`)
 
   try {
