@@ -8,23 +8,23 @@ import XLSX from 'xlsx'
 import { pool, initDatabase } from './backend/db.js'
 import recordsRoutes from './backend/routes/records.js'
 import authRoutes from './backend/routes/auth.js'
-import categoriesRoutes from './backend/routes/categories.js'
+import categoriesRoutes, { syncCategoriesOnce } from './backend/routes/categories.js'
 
-// Load environment variables
-const envResult = dotenv.config()
-if (envResult.error) {
-  console.warn('Warning: .env file not found or error loading:', envResult.error)
-} else {
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const envPath = path.join(__dirname, '.env')
+
+// Load local .env only when present (Render uses dashboard env vars).
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath })
   console.log('Environment variables loaded from .env')
-  console.log('DB_USER:', process.env.DB_USER || 'not set')
-  console.log('DB_NAME:', process.env.DB_NAME || 'not set')
-  console.log('DB_PASSWORD:', process.env.DB_PASSWORD ? '***' : 'not set')
+} else {
+  console.log('No .env file found; using process environment variables')
 }
 
 const app = express()
 const PORT = process.env.PORT || 5000
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const BODY_LIMIT = process.env.BODY_LIMIT || '10mb'
 
 // Middleware
 // CORS configuration - allow requests from frontend
@@ -58,9 +58,9 @@ app.use(cors({
   },
   credentials: true
 }))
-// Increase body size limit for large Excel imports (50MB)
-app.use(express.json({ limit: '50mb' }))
-app.use(express.urlencoded({ extended: true, limit: '50mb' }))
+// Keep body limit modest for 512MB instances; imports are chunked client-side.
+app.use(express.json({ limit: BODY_LIMIT }))
+app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT }))
 
 // Routes
 app.use('/api/auth', authRoutes)
@@ -162,10 +162,12 @@ if (fs.existsSync(distPath)) {
 
 // Initialize database on startup
 initDatabase()
-  .then(() => {
+  .then(async () => {
     console.log(`✓ Database connection established`)
     console.log(`✓ Database schema initialized successfully`)
     console.log(`✓ Tables created/verified`)
+    await syncCategoriesOnce()
+    console.log(`✓ Categories synchronized`)
   })
   .catch((error) => {
     console.error('✗ Failed to initialize database:', error.message)

@@ -18,6 +18,10 @@ const CANONICAL_CUSTOM_CATEGORIES = {
   institute: { id: 'custom_institute', name: 'Institute' },
 }
 
+const CACHE_TTL_MS = 5 * 60 * 1000
+let categoriesCache = null
+let categoriesCacheAt = 0
+
 const rowsToCategoryMap = (rows) => {
   const categories = {}
   rows.forEach((row) => {
@@ -32,56 +36,38 @@ const rowsToCategoryMap = (rows) => {
   return categories
 }
 
-const mergeCategoriesFromRecords = async (categoriesMap) => {
-  const recordsResult = await pool.query(`
-    SELECT DISTINCT data->>'_categoryId' AS category_id, data->>'_categoryName' AS category_name
-    FROM records
-    WHERE data ? '_categoryName'
-      AND COALESCE(data->>'_categoryName', '') <> ''
-  `)
+const invalidateCategoriesCache = () => {
+  categoriesCache = null
+  categoriesCacheAt = 0
+}
 
-  for (const row of recordsResult.rows) {
-    const category = normalizeCustomCategory(row.category_name, row.category_id)
-    if (!category) continue
-    if (PROTECTED_DEFAULT_IDS.includes(category.id)) continue
+const loadCategoriesFromDb = async () => {
+  const result = await pool.query(
+    'SELECT id, name, type, items, created_at, updated_at FROM categories ORDER BY created_at ASC'
+  )
+  return rowsToCategoryMap(result.rows)
+}
 
-    const existingById = categoriesMap[category.id]
-    const existingByName = Object.values(categoriesMap).find(
-      (item) => String(item.name || '').toLowerCase() === String(category.name).toLowerCase()
-    )
-
-    if (!existingById && !existingByName) {
-      categoriesMap[category.id] = {
-        name: category.name,
-        type: 'custom',
-        items: [],
-      }
-    }
+const getCachedCategories = async () => {
+  const now = Date.now()
+  if (categoriesCache && now - categoriesCacheAt < CACHE_TTL_MS) {
+    return categoriesCache
   }
-
-  return categoriesMap
+  categoriesCache = await loadCategoriesFromDb()
+  categoriesCacheAt = now
+  return categoriesCache
 }
 
 const ensureDefaultCategories = async () => {
-  const client = await pool.connect()
-  try {
-    await client.query('BEGIN')
-    for (const [id, category] of Object.entries(DEFAULT_CATEGORIES)) {
-      await client.query(
-        `
-        INSERT INTO categories (id, name, type, items)
-        VALUES ($1, $2, $3, $4::jsonb)
-        ON CONFLICT (id) DO NOTHING
-        `,
-        [id, category.name, category.type, JSON.stringify(category.items)]
-      )
-    }
-    await client.query('COMMIT')
-  } catch (error) {
-    await client.query('ROLLBACK')
-    throw error
-  } finally {
-    client.release()
+  for (const [id, category] of Object.entries(DEFAULT_CATEGORIES)) {
+    await pool.query(
+      `
+      INSERT INTO categories (id, name, type, items)
+      VALUES ($1, $2, $3, $4::jsonb)
+      ON CONFLICT (id) DO NOTHING
+      `,
+      [id, category.name, category.type, JSON.stringify(category.items)]
+    )
   }
 }
 
@@ -100,7 +86,6 @@ const normalizeCustomCategory = (rawName, rawId) => {
     return CANONICAL_CUSTOM_CATEGORIES.colleges
   }
 
-  // If no canonical mapping matched, keep existing custom category naming.
   if (!normalizedName) {
     return null
   }
@@ -118,46 +103,37 @@ const ensureCategoriesFromExistingRecords = async () => {
       AND COALESCE(data->>'_categoryName', '') <> ''
   `)
 
-  const client = await pool.connect()
-  try {
-    await client.query('BEGIN')
-    for (const row of recordsResult.rows) {
-      const category = normalizeCustomCategory(row.category_name, row.category_id)
-      if (!category) continue
-      if (PROTECTED_DEFAULT_IDS.includes(category.id)) continue
+  for (const row of recordsResult.rows) {
+    const category = normalizeCustomCategory(row.category_name, row.category_id)
+    if (!category) continue
+    if (PROTECTED_DEFAULT_IDS.includes(category.id)) continue
 
-      await client.query(
-        `
-        INSERT INTO categories (id, name, type, items)
-        SELECT $1::varchar, $2::varchar, 'custom', '[]'::jsonb
-        WHERE NOT EXISTS (
-          SELECT 1 FROM categories WHERE id = $1::varchar OR LOWER(name) = LOWER($2::varchar)
-        )
-        `,
-        [category.id, category.name]
+    await pool.query(
+      `
+      INSERT INTO categories (id, name, type, items)
+      SELECT $1::varchar, $2::varchar, 'custom', '[]'::jsonb
+      WHERE NOT EXISTS (
+        SELECT 1 FROM categories WHERE id = $1::varchar OR LOWER(name) = LOWER($2::varchar)
       )
-    }
-    await client.query('COMMIT')
-  } catch (error) {
-    await client.query('ROLLBACK')
-    throw error
-  } finally {
-    client.release()
+      `,
+      [category.id, category.name]
+    )
   }
+}
+
+// Run once at startup (not on every GET) to keep memory/cpu low on 512MB instances.
+export async function syncCategoriesOnce() {
+  await ensureDefaultCategories()
+  await ensureCategoriesFromExistingRecords()
+  invalidateCategoriesCache()
 }
 
 router.use(authenticateToken)
 
 router.get('/', async (req, res) => {
   try {
-    await ensureDefaultCategories()
-    await ensureCategoriesFromExistingRecords()
-    const result = await pool.query(
-      'SELECT id, name, type, items, created_at, updated_at FROM categories ORDER BY created_at ASC'
-    )
-    const categoriesMap = rowsToCategoryMap(result.rows)
-    const mergedMap = await mergeCategoriesFromRecords(categoriesMap)
-    return res.json(mergedMap)
+    const categoriesMap = await getCachedCategories()
+    return res.json(categoriesMap)
   } catch (error) {
     console.error('Error fetching categories:', error)
     return res.status(500).json({ error: 'Failed to fetch categories' })
@@ -181,6 +157,8 @@ router.post('/', async (req, res) => {
       `,
       [newId, trimmedName, type]
     )
+
+    invalidateCategoriesCache()
 
     const created = result.rows[0]
     return res.status(201).json({
@@ -221,6 +199,7 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Category not found' })
     }
 
+    invalidateCategoriesCache()
     return res.json({ success: true })
   } catch (error) {
     console.error('Error renaming category:', error)
@@ -239,6 +218,8 @@ router.delete('/:id', async (req, res) => {
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Category not found' })
     }
+
+    invalidateCategoriesCache()
     return res.json({ success: true })
   } catch (error) {
     console.error('Error deleting category:', error)

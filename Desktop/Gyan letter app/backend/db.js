@@ -11,6 +11,9 @@ export const pool = new Pool({
   database: process.env.DB_NAME || 'gyan_letter_db',
   password: process.env.DB_PASSWORD || 'postgres',
   port: process.env.DB_PORT || 5432,
+  max: Number(process.env.DB_POOL_MAX || 3),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
   // SSL configuration for cloud databases (Neon, Supabase, etc.)
   ssl: process.env.DB_HOST && process.env.DB_HOST !== 'localhost' ? {
     rejectUnauthorized: false
@@ -24,7 +27,6 @@ pool.on('connect', () => {
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err)
-  process.exit(-1)
 })
 
 // Initialize database schema
