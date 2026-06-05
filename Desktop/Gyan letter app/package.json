@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "node server.js",
+    "server": "node --max-old-space-size=384 server.js",
     "dev:server": "node --watch server.js",
     "setup": "node setup.js",
     "start": "powershell -ExecutionPolicy Bypass -File start.ps1",

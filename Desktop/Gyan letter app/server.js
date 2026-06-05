@@ -41,18 +41,13 @@ app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) {
-      console.log('[CORS] Request with no origin, allowing')
       return callback(null, true)
     }
     if (allowedOrigins.indexOf(origin) !== -1) {
-      console.log('[CORS] Allowing origin:', origin)
       callback(null, true)
     } else if (process.env.NODE_ENV !== 'production') {
-      console.log('[CORS] Development mode, allowing origin:', origin)
       callback(null, true)
     } else {
-      // In production, allow all for now but log it
-      console.log('[CORS] Production mode, allowing origin:', origin)
       callback(null, true)
     }
   },

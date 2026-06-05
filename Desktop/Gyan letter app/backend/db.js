@@ -140,6 +140,14 @@ export async function initDatabase() {
       )
     }
 
+    // Heavy one-time migration: skip on 512MB instances after initial setup.
+    // Set RUN_LEGACY_MIGRATIONS=true only when you need to re-run backfill.
+    if (process.env.RUN_LEGACY_MIGRATIONS !== 'true') {
+      console.log('Skipping legacy record backfill (set RUN_LEGACY_MIGRATIONS=true to enable)')
+      console.log('Database schema initialized successfully')
+      return
+    }
+
     // Backfill legacy records so existing uploaded data points to synchronized categories.
     // Handles common ID and name variations (including typos).
     const recordCategoryMappings = [

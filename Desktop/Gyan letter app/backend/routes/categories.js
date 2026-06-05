@@ -124,7 +124,18 @@ const ensureCategoriesFromExistingRecords = async () => {
 // Run once at startup (not on every GET) to keep memory/cpu low on 512MB instances.
 export async function syncCategoriesOnce() {
   await ensureDefaultCategories()
-  await ensureCategoriesFromExistingRecords()
+
+  const customCountResult = await pool.query(`
+    SELECT COUNT(*)::int AS count
+    FROM categories
+    WHERE id NOT IN ('default', 'states', 'universities', 'emails')
+  `)
+  const customCount = customCountResult.rows[0]?.count ?? 0
+
+  if (customCount === 0) {
+    await ensureCategoriesFromExistingRecords()
+  }
+
   invalidateCategoriesCache()
 }
 
