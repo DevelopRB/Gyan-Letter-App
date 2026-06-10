@@ -26,6 +26,16 @@ export const databaseService = {
     }
   },
 
+  // Get aggregated overview stats
+  async getStats() {
+    try {
+      return await apiService.getRecordStats()
+    } catch (error) {
+      console.error('Error fetching record stats:', error)
+      throw error
+    }
+  },
+
   // Get all records
   async getAll() {
     try {

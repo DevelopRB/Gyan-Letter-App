@@ -2,62 +2,109 @@ import { useMemo } from 'react'
 import { Folder, FileText, TrendingUp, ArrowRight } from 'lucide-react'
 import { categoryService } from '../services/categoryService'
 
-export default function CategoryDashboard({ records, onCategorySelect }) {
-  const categoryStats = useMemo(() => {
-    const stats = {}
-    const categories = categoryService.getAll()
-    
-    // Initialize stats for all categories
-    Object.keys(categories).forEach(catId => {
-      const cat = categories[catId]
-      stats[catId] = {
-        id: catId,
-        name: cat.name,
-        type: cat.type,
-        totalRecords: 0,
-        items: {} // For item-level breakdown (states, universities, etc.)
-      }
-    })
-    
-    // Count records per category
-    records.forEach(record => {
-      const categoryId = record._categoryId
-      const categoryName = record._categoryName
-      const selectedItem = record._selectedItem
-      
-      if (categoryId) {
-        // Initialize if category exists but not in stats
-        if (!stats[categoryId]) {
-          stats[categoryId] = {
-            id: categoryId,
-            name: categoryName || 'Unknown Category',
-            type: 'custom',
-            totalRecords: 0,
-            items: {}
-          }
-        }
-        
-        stats[categoryId].totalRecords++
-        
-        // Track item-level stats
-        if (selectedItem) {
-          if (!stats[categoryId].items[selectedItem]) {
-            stats[categoryId].items[selectedItem] = 0
-          }
-          stats[categoryId].items[selectedItem]++
-        }
-      }
-    })
-    
-    // Count uncategorized records
-    const uncategorizedCount = records.filter(r => !r._categoryId).length
-    
-    return {
-      categories: Object.values(stats).filter(cat => cat.totalRecords > 0),
-      uncategorized: uncategorizedCount,
-      total: records.length
+const buildStatsFromRecords = (records) => {
+  const stats = {}
+  const categories = categoryService.getAll()
+
+  Object.keys(categories).forEach(catId => {
+    const cat = categories[catId]
+    stats[catId] = {
+      id: catId,
+      name: cat.name,
+      type: cat.type,
+      totalRecords: 0,
+      items: {}
     }
-  }, [records])
+  })
+
+  records.forEach(record => {
+    const categoryId = record._categoryId
+    const categoryName = record._categoryName
+    const selectedItem = record._selectedItem
+
+    if (categoryId) {
+      if (!stats[categoryId]) {
+        stats[categoryId] = {
+          id: categoryId,
+          name: categoryName || 'Unknown Category',
+          type: 'custom',
+          totalRecords: 0,
+          items: {}
+        }
+      }
+
+      stats[categoryId].totalRecords++
+
+      if (selectedItem) {
+        if (!stats[categoryId].items[selectedItem]) {
+          stats[categoryId].items[selectedItem] = 0
+        }
+        stats[categoryId].items[selectedItem]++
+      }
+    }
+  })
+
+  const uncategorizedCount = records.filter(r => !r._categoryId).length
+
+  return {
+    categories: Object.values(stats).filter(cat => cat.totalRecords > 0),
+    uncategorized: uncategorizedCount,
+    total: records.length
+  }
+}
+
+const buildStatsFromOverview = (overviewStats) => {
+  const stats = {}
+  const categories = categoryService.getAll()
+
+  Object.keys(categories).forEach(catId => {
+    const cat = categories[catId]
+    stats[catId] = {
+      id: catId,
+      name: cat.name,
+      type: cat.type,
+      totalRecords: 0,
+      items: overviewStats.itemsByCategory?.[catId] || {}
+    }
+  })
+
+  for (const row of overviewStats.byCategory || []) {
+    const categoryId = row.categoryId
+    if (!categoryId) continue
+
+    if (!stats[categoryId]) {
+      stats[categoryId] = {
+        id: categoryId,
+        name: row.categoryName || 'Unknown Category',
+        type: 'custom',
+        totalRecords: 0,
+        items: overviewStats.itemsByCategory?.[categoryId] || {}
+      }
+    }
+
+    stats[categoryId].totalRecords = row.count
+    if (!stats[categoryId].name && row.categoryName) {
+      stats[categoryId].name = row.categoryName
+    }
+    if (!stats[categoryId].items || Object.keys(stats[categoryId].items).length === 0) {
+      stats[categoryId].items = overviewStats.itemsByCategory?.[categoryId] || {}
+    }
+  }
+
+  return {
+    categories: Object.values(stats).filter(cat => cat.totalRecords > 0),
+    uncategorized: overviewStats.uncategorized || 0,
+    total: overviewStats.total || 0
+  }
+}
+
+export default function CategoryDashboard({ records = [], overviewStats, onCategorySelect }) {
+  const categoryStats = useMemo(() => {
+    if (overviewStats) {
+      return buildStatsFromOverview(overviewStats)
+    }
+    return buildStatsFromRecords(records)
+  }, [records, overviewStats])
 
   const handleCategoryClick = (categoryId) => {
     onCategorySelect?.(categoryId)

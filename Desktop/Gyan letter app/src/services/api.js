@@ -51,6 +51,17 @@ export const apiService = {
     return response.json()
   },
 
+  // Aggregated overview stats (total + per-category counts)
+  async getRecordStats() {
+    const response = await fetch(`${API_BASE_URL}/records/stats`, {
+      headers: getHeaders(),
+    })
+    if (!response.ok) {
+      throw new Error('Failed to fetch record stats')
+    }
+    return response.json()
+  },
+
   // Backward compatible all-records fetch (legacy screens)
   async getAll(search = '') {
     const limit = 500

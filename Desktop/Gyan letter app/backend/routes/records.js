@@ -106,6 +106,69 @@ router.get('/', async (req, res) => {
   }
 })
 
+// Aggregated stats for the overview dashboard (no full-record load)
+router.get('/stats', async (req, res) => {
+  try {
+    const [totalsResult, categoryResult, itemsResult] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (
+            WHERE data->>'_categoryId' IS NULL
+               OR TRIM(COALESCE(data->>'_categoryId', '')) = ''
+          )::int AS uncategorized
+        FROM records
+      `),
+      pool.query(`
+        SELECT
+          data->>'_categoryId' AS category_id,
+          MAX(data->>'_categoryName') AS category_name,
+          COUNT(*)::int AS count
+        FROM records
+        WHERE data->>'_categoryId' IS NOT NULL
+          AND TRIM(COALESCE(data->>'_categoryId', '')) <> ''
+        GROUP BY data->>'_categoryId'
+        ORDER BY count DESC
+      `),
+      pool.query(`
+        SELECT
+          data->>'_categoryId' AS category_id,
+          data->>'_selectedItem' AS item,
+          COUNT(*)::int AS count
+        FROM records
+        WHERE data->>'_categoryId' IS NOT NULL
+          AND TRIM(COALESCE(data->>'_categoryId', '')) <> ''
+          AND data->>'_selectedItem' IS NOT NULL
+          AND TRIM(data->>'_selectedItem') <> ''
+        GROUP BY data->>'_categoryId', data->>'_selectedItem'
+        ORDER BY category_id, count DESC
+      `)
+    ])
+
+    const itemsByCategory = {}
+    for (const row of itemsResult.rows) {
+      if (!itemsByCategory[row.category_id]) {
+        itemsByCategory[row.category_id] = {}
+      }
+      itemsByCategory[row.category_id][row.item] = row.count
+    }
+
+    res.json({
+      total: totalsResult.rows[0]?.total ?? 0,
+      uncategorized: totalsResult.rows[0]?.uncategorized ?? 0,
+      byCategory: categoryResult.rows.map((row) => ({
+        categoryId: row.category_id,
+        categoryName: row.category_name || 'Unknown Category',
+        count: row.count
+      })),
+      itemsByCategory
+    })
+  } catch (error) {
+    console.error('Error fetching record stats:', error)
+    res.status(500).json({ error: 'Failed to fetch record stats' })
+  }
+})
+
 // Get a single record by ID
 router.get('/:id', async (req, res) => {
   try {

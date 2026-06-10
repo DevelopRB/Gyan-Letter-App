@@ -164,6 +164,8 @@ export default function DatabaseManager() {
   const [currentPage, setCurrentPage] = useState(1)
   const [serverTotalRecords, setServerTotalRecords] = useState(0)
   const [serverTotalPages, setServerTotalPages] = useState(1)
+  const [overviewStats, setOverviewStats] = useState(null)
+  const [overviewStatsLoading, setOverviewStatsLoading] = useState(false)
   const [importProgress, setImportProgress] = useState({
     currentChunk: 0,
     totalChunks: 0,
@@ -204,6 +206,24 @@ export default function DatabaseManager() {
     }, 250)
     return () => clearTimeout(timeoutId)
   }, [currentPage, rowsPerPage, selectedCategory, searchQuery])
+
+  useEffect(() => {
+    if (!selectedCategory && !searchQuery.trim()) {
+      loadOverviewStats()
+    }
+  }, [selectedCategory, searchQuery])
+
+  const loadOverviewStats = async () => {
+    setOverviewStatsLoading(true)
+    try {
+      const stats = await databaseService.getStats()
+      setOverviewStats(stats)
+    } catch (err) {
+      console.error('Error loading overview stats:', err)
+    } finally {
+      setOverviewStatsLoading(false)
+    }
+  }
 
   const loadRecords = async () => {
     setLoading(true)
@@ -1123,6 +1143,7 @@ export default function DatabaseManager() {
       setSaveModalCategoryMode('existing')
       setSaveModalNewCategoryName('')
       await loadRecords()
+      await loadOverviewStats()
       alert('Record saved successfully!')
     } catch (err) {
       setError('Failed to add record. Please try again.')
@@ -1186,6 +1207,7 @@ export default function DatabaseManager() {
       await databaseService.delete(deleteConfirm)
       setDeleteConfirm(null)
       await loadRecords()
+      await loadOverviewStats()
     } catch (err) {
       setError('Failed to delete record. Please try again.')
       console.error('Error deleting record:', err)
@@ -3443,9 +3465,10 @@ export default function DatabaseManager() {
         )}
 
         {/* Category Dashboard - Show when no real category is selected */}
-        {!selectedCategory && !loading && records.length > 0 && (
+        {!selectedCategory && !searchQuery.trim() && (overviewStats?.total > 0 || records.length > 0) && (
           <CategoryDashboard
             records={records}
+            overviewStats={overviewStats}
             onCategorySelect={handleCategoryChange}
           />
         )}
