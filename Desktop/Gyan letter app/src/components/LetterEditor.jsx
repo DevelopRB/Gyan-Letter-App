@@ -36,7 +36,9 @@ export default function LetterEditor() {
     }
   ])
   const [globalSearch, setGlobalSearch] = useState('')
-  const [allRecords, setAllRecords] = useState([]) // Store all records before filtering
+  const [allRecords, setAllRecords] = useState([]) // Category records loaded from server
+  const [categoryTotalRecords, setCategoryTotalRecords] = useState(0)
+  const [recordsLoading, setRecordsLoading] = useState(false)
   const [approvedRecords, setApprovedRecords] = useState([]) // Records approved for letter generation
   const [showPreviewModal, setShowPreviewModal] = useState(false)
   const [previewRecords, setPreviewRecords] = useState([])
@@ -242,13 +244,81 @@ export default function LetterEditor() {
     return result
   }
 
-  const loadRecords = async () => {
+  const extractFieldNamesFromRecords = (recordsList) => {
+    const fieldNamesSet = new Set()
+    recordsList.forEach(record => {
+      Object.keys(record).forEach(key => {
+        if (key !== 'id' && key !== 'createdAt' && key !== 'updatedAt' && !key.startsWith('_')) {
+          fieldNamesSet.add(key)
+        }
+      })
+    })
+    return Array.from(fieldNamesSet)
+  }
+
+  const loadRecords = async ({ fetchAll = false } = {}) => {
+    if (!selectedCategory && selectedCategories.length === 0) {
+      setAllRecords([])
+      setRecords([])
+      setCategoryTotalRecords(0)
+      setFieldNames([])
+      return []
+    }
+
+    setRecordsLoading(true)
     try {
-      const data = await databaseService.getAll()
-      setAllRecords(data) // Store all records
+      let data = []
+      let total = 0
+
+      if (selectedCategories.length > 0) {
+        const categoryIds = [...selectedCategories]
+        const results = await Promise.all(
+          categoryIds.map((categoryId) =>
+            fetchAll
+              ? databaseService.getAllForCategory(categoryId, globalSearch.trim())
+              : databaseService.getPaginated({
+                  categoryId,
+                  page: 1,
+                  limit: 500,
+                  search: globalSearch.trim()
+                }).then((response) => {
+                  total += response.total || 0
+                  return response.records || []
+                })
+          )
+        )
+        data = results.flat()
+        total = fetchAll ? data.length : total || data.length
+      } else if (selectedCategory) {
+        if (fetchAll) {
+          data = await databaseService.getAllForCategory(selectedCategory, globalSearch.trim())
+          total = data.length
+        } else {
+          const response = await databaseService.getPaginated({
+            categoryId: selectedCategory,
+            page: 1,
+            limit: 500,
+            search: globalSearch.trim()
+          })
+          data = response.records || []
+          total = response.total || data.length
+        }
+      }
+
+      setAllRecords(data)
+      setCategoryTotalRecords(total)
       applyFiltersToRecords(data)
+      setFieldNames(extractFieldNamesFromRecords(data))
+      return data
     } catch (error) {
       console.error('Error loading records:', error)
+      setAllRecords([])
+      setRecords([])
+      setCategoryTotalRecords(0)
+      setFieldNames([])
+      return []
+    } finally {
+      setRecordsLoading(false)
     }
   }
 
@@ -299,13 +369,13 @@ export default function LetterEditor() {
 
   useEffect(() => {
     loadRecords()
-  }, [])
+  }, [selectedCategory, selectedCategories, globalSearch])
 
   useEffect(() => {
     if (allRecords.length > 0) {
       applyFiltersToRecords()
     }
-  }, [selectedCategory, selectedCategories, globalSearch, filterGroups])
+  }, [filterGroups])
 
   const loadTemplates = () => {
     try {
@@ -693,9 +763,14 @@ export default function LetterEditor() {
   }
 
   // Show preview of filtered records
-  const showPreview = () => {
+  const showPreview = async () => {
+    let sourceRecords = allRecords
+    if (allRecords.length < categoryTotalRecords) {
+      sourceRecords = await loadRecords({ fetchAll: true })
+    }
+
     // Get current filtered records
-    let result = [...allRecords]
+    let result = [...sourceRecords]
 
     // Apply filters
     if (selectedCategories.length > 0) {
@@ -980,46 +1055,6 @@ export default function LetterEditor() {
     applyFiltersToRecords()
   }
 
-  useEffect(() => {
-    const loadFieldNames = async () => {
-      try {
-        let allRecords = await databaseService.getAll()
-        
-        // Filter by category if selected
-        if (selectedCategory) {
-          allRecords = allRecords.filter(record => {
-            const recordCategoryId = record._categoryId
-            if (!recordCategoryId) return false
-            return recordCategoryId === selectedCategory
-          })
-        }
-        
-        if (allRecords.length === 0) {
-          setFieldNames([])
-          return
-        }
-        
-        const fieldNamesSet = new Set()
-        allRecords.forEach(record => {
-          Object.keys(record).forEach(key => {
-            // Exclude internal fields and category fields
-            if (key !== 'id' && 
-                key !== 'createdAt' && 
-                key !== 'updatedAt' &&
-                !key.startsWith('_')) {
-              fieldNamesSet.add(key)
-            }
-          })
-        })
-        setFieldNames(Array.from(fieldNamesSet))
-      } catch (error) {
-        console.error('Error loading field names:', error)
-      }
-    }
-    loadFieldNames()
-  }, [records, selectedCategory])
-
-
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="bg-white rounded-lg shadow-lg p-6">
@@ -1253,9 +1288,16 @@ export default function LetterEditor() {
               </option>
             ))}
           </select>
-          {selectedCategory && records.length > 0 && (
+          {recordsLoading && (
+            <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Loading records...
+            </p>
+          )}
+          {!recordsLoading && selectedCategory && records.length > 0 && (
             <p className="text-xs text-gray-500 mt-1">
-              Showing {records.length} record{records.length !== 1 ? 's' : ''} from this category
+              Showing {records.length}
+              {categoryTotalRecords > records.length ? ` of ${categoryTotalRecords}` : ''} record{categoryTotalRecords !== 1 ? 's' : ''} from this category
             </p>
           )}
         </div>
@@ -1451,7 +1493,10 @@ export default function LetterEditor() {
                   <strong>Subject:</strong> {replaceVariables(subject, selectedRecord)}
                 </div>
               )}
-              <div dangerouslySetInnerHTML={{ __html: replaceVariables(content, selectedRecord) }} />
+              <div
+                className="letter-preview-content"
+                dangerouslySetInnerHTML={{ __html: replaceVariables(content, selectedRecord) }}
+              />
             </div>
           </div>
         )}

@@ -26,6 +26,23 @@ export const databaseService = {
     }
   },
 
+  // Fetch all records for a single category (paginated server-side)
+  async getAllForCategory(categoryId, search = '') {
+    const limit = 500
+    let page = 1
+    let totalPages = 1
+    const allRecords = []
+
+    do {
+      const result = await this.getPaginated({ categoryId, search, page, limit })
+      allRecords.push(...(result.records || []))
+      totalPages = result.totalPages || 1
+      page += 1
+    } while (page <= totalPages)
+
+    return allRecords
+  },
+
   // Get aggregated overview stats
   async getStats() {
     try {
