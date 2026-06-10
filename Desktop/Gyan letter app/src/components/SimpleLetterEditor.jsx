@@ -1,34 +1,158 @@
 import { useState, useRef, useEffect } from 'react'
 import { Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, List, Link, Image as ImageIcon, Type, X } from 'lucide-react'
 
+const ALIGN_STYLES = {
+  left: 'left',
+  center: 'center',
+  right: 'right'
+}
+
+const SIZE_WIDTH = {
+  small: '25',
+  medium: '50',
+  large: '75',
+  full: '100'
+}
+
+const FORMATTING_SELECTOR = 'font, span, b, strong, i, em, u, s, strike, a, sub, sup'
+const STYLED_BLOCK_SELECTOR = 'p[style], div[style], li[style], h1[style], h2[style], h3[style], h4[style], h5[style], h6[style]'
+
+const hasFormatting = (root) => {
+  return Boolean(
+    root.querySelector(`${FORMATTING_SELECTOR}, ${STYLED_BLOCK_SELECTOR}, [align]`)
+  )
+}
+
+const unwrapElement = (element) => {
+  const parent = element.parentNode
+  if (!parent) return
+  while (element.firstChild) {
+    parent.insertBefore(element.firstChild, element)
+  }
+  parent.removeChild(element)
+}
+
+const clearFormattingInNode = (root) => {
+  const formattingEls = root.querySelectorAll(FORMATTING_SELECTOR)
+  for (let i = formattingEls.length - 1; i >= 0; i--) {
+    const el = formattingEls[i]
+    if (el.closest('.editor-image-wrap')) continue
+    unwrapElement(el)
+  }
+
+  root.querySelectorAll(STYLED_BLOCK_SELECTOR).forEach((el) => {
+    if (el.classList?.contains('editor-image-wrap')) return
+    el.removeAttribute('style')
+    el.removeAttribute('align')
+    el.removeAttribute('class')
+  })
+}
+
+function applyImageWrapperStyles(wrapper, align = 'center') {
+  wrapper.className = 'editor-image-wrap'
+  wrapper.dataset.align = align
+  wrapper.style.cssText = 'display:block;width:100%;clear:both;margin:12px 0;text-align:' + (ALIGN_STYLES[align] || 'center') + ';'
+}
+
+function applyImageStyles(img, widthPercent = '50', align = 'center') {
+  img.className = 'editor-image'
+  img.dataset.width = widthPercent
+  img.dataset.align = align
+  img.style.cssText = 'max-width:' + widthPercent + '%;width:' + widthPercent + '%;height:auto;display:inline-block;vertical-align:top;cursor:pointer;'
+}
+
+function wrapOrphanImages(root) {
+  if (!root) return
+  root.querySelectorAll('img').forEach((img) => {
+    if (img.closest('.editor-image-wrap')) return
+    const wrapper = document.createElement('div')
+    applyImageWrapperStyles(wrapper, img.dataset.align || 'center')
+    applyImageStyles(img, img.dataset.width || '50', img.dataset.align || 'center')
+    img.parentNode?.insertBefore(wrapper, img)
+    wrapper.appendChild(img)
+  })
+}
+
+function attachImageClickHandlers(root, onImageClick) {
+  root?.querySelectorAll('img.editor-image').forEach((img) => {
+    img.onclick = (e) => {
+      e.stopPropagation()
+      onImageClick(img)
+    }
+  })
+}
+
 export default function SimpleLetterEditor({ value, onChange, placeholder, onVariableInsert }) {
   const editorRef = useRef(null)
   const [isFocused, setIsFocused] = useState(false)
+  const [showImageOptions, setShowImageOptions] = useState(false)
+  const [selectedImage, setSelectedImage] = useState(null)
+
+  const openImageOptions = (img) => {
+    setSelectedImage(img)
+    setShowImageOptions(true)
+  }
 
   useEffect(() => {
     if (editorRef.current && value !== editorRef.current.innerHTML) {
       editorRef.current.innerHTML = value || ''
-      
-      // Re-attach click handlers to images after content update
-      setTimeout(() => {
-        const images = editorRef.current?.querySelectorAll('img.editor-image')
-        images?.forEach(img => {
-          if (!img.onclick) {
-            img.onclick = (e) => {
-              e.stopPropagation()
-              setSelectedImage(img)
-              setShowImageOptions(true)
-            }
-          }
-        })
-      }, 100)
+      wrapOrphanImages(editorRef.current)
+      attachImageClickHandlers(editorRef.current, openImageOptions)
     }
   }, [value])
 
+  const preventToolbarFocusLoss = (e) => {
+    e.preventDefault()
+  }
+
   const execCommand = (command, value = null) => {
-    document.execCommand(command, false, value)
     editorRef.current?.focus()
+    document.execCommand(command, false, value)
     updateContent()
+  }
+
+  const clearFormatting = () => {
+    const editor = editorRef.current
+    if (!editor) return
+
+    editor.focus()
+    const selection = window.getSelection()
+    const hasSelection = selection?.rangeCount > 0 && !selection.isCollapsed
+
+    if (hasSelection) {
+      const range = selection.getRangeAt(0)
+      const fragment = range.extractContents()
+      const wrapper = document.createElement('div')
+      wrapper.appendChild(fragment)
+
+      if (!hasFormatting(wrapper)) {
+        range.insertNode(fragment)
+        range.collapse(false)
+        selection.removeAllRanges()
+        selection.addRange(range)
+        return
+      }
+
+      clearFormattingInNode(wrapper)
+      const restored = document.createDocumentFragment()
+      while (wrapper.firstChild) {
+        restored.appendChild(wrapper.firstChild)
+      }
+      range.insertNode(restored)
+      range.collapse(false)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      updateContent()
+    } else if (hasFormatting(editor)) {
+      clearFormattingInNode(editor)
+
+      const range = document.createRange()
+      range.selectNodeContents(editor)
+      range.collapse(false)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      updateContent()
+    }
   }
 
   const updateContent = () => {
@@ -95,6 +219,10 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           // Create temporary container for HTML
           const tempDiv = document.createElement('div')
           tempDiv.innerHTML = html
+          wrapOrphanImages(tempDiv)
+          tempDiv.querySelectorAll('img').forEach((img) => {
+            img.style.float = 'none'
+          })
           
           const fragment = document.createDocumentFragment()
           while (tempDiv.firstChild) {
@@ -102,6 +230,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           }
           
           range.insertNode(fragment)
+          attachImageClickHandlers(editorRef.current, openImageOptions)
           range.setStartAfter(fragment.lastChild || range.startContainer)
           range.collapse(true)
           selection.removeAllRanges()
@@ -131,9 +260,6 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
     }
   }
 
-  const [showImageOptions, setShowImageOptions] = useState(false)
-  const [selectedImage, setSelectedImage] = useState(null)
-
   const handleImageUpload = () => {
     const input = document.createElement('input')
     input.type = 'file'
@@ -147,31 +273,28 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
         }
         const reader = new FileReader()
         reader.onload = (event) => {
+          const wrapper = document.createElement('div')
           const img = document.createElement('img')
           img.src = event.target.result
-          img.style.maxWidth = '100%'
-          img.style.height = 'auto'
-          img.style.cursor = 'pointer'
-          img.className = 'editor-image'
-          img.dataset.width = '100'
-          img.dataset.align = 'left'
-          
-          // Add click handler for image formatting
+          applyImageWrapperStyles(wrapper, 'center')
+          applyImageStyles(img, '50', 'center')
           img.onclick = (e) => {
             e.stopPropagation()
-            setSelectedImage(img)
-            setShowImageOptions(true)
+            openImageOptions(img)
           }
-          
+          wrapper.appendChild(img)
+
           const selection = window.getSelection()
           if (selection.rangeCount > 0) {
-            selection.getRangeAt(0).insertNode(img)
+            const range = selection.getRangeAt(0)
+            range.collapse(false)
+            range.insertNode(wrapper)
+            range.setStartAfter(wrapper)
+            range.collapse(true)
+            selection.removeAllRanges()
+            selection.addRange(range)
             updateContent()
-            // Show options immediately after insertion
-            setTimeout(() => {
-              setSelectedImage(img)
-              setShowImageOptions(true)
-            }, 100)
+            setTimeout(() => openImageOptions(img), 100)
           }
         }
         reader.readAsDataURL(file)
@@ -181,27 +304,22 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
   }
 
   const formatImage = (property, value) => {
-    if (selectedImage) {
-      if (property === 'align') {
-        selectedImage.style.float = value
-        selectedImage.style.display = 'block'
-        selectedImage.style.margin = value === 'left' ? '0 10px 10px 0' : value === 'right' ? '0 0 10px 10px' : '10px auto'
-        selectedImage.dataset.align = value
-      } else if (property === 'width') {
-        selectedImage.style.width = value + '%'
-        selectedImage.dataset.width = value
-      } else if (property === 'size') {
-        const sizes = {
-          small: '25%',
-          medium: '50%',
-          large: '75%',
-          full: '100%'
-        }
-        selectedImage.style.width = sizes[value] || '100%'
-        selectedImage.dataset.width = value === 'small' ? '25' : value === 'medium' ? '50' : value === 'large' ? '75' : '100'
-      }
-      updateContent()
+    if (!selectedImage) return
+
+    const wrapper = selectedImage.closest('.editor-image-wrap')
+    const align = property === 'align' ? value : (selectedImage.dataset.align || 'center')
+    let width = selectedImage.dataset.width || '50'
+
+    if (property === 'align') {
+      if (wrapper) applyImageWrapperStyles(wrapper, value)
+    } else if (property === 'width') {
+      width = String(value)
+    } else if (property === 'size') {
+      width = SIZE_WIDTH[value] || '50'
     }
+
+    applyImageStyles(selectedImage, width, align)
+    updateContent()
   }
 
   const insertVariable = (variableName) => {
@@ -237,6 +355,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
         <div className="flex items-center gap-1 border-r border-gray-300 pr-2">
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => execCommand('bold')}
             className="p-2 hover:bg-gray-200 rounded"
             title="Bold"
@@ -245,6 +364,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           </button>
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => execCommand('italic')}
             className="p-2 hover:bg-gray-200 rounded"
             title="Italic"
@@ -253,6 +373,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           </button>
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => execCommand('underline')}
             className="p-2 hover:bg-gray-200 rounded"
             title="Underline"
@@ -264,6 +385,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
         {/* Font Size */}
         <div className="flex items-center gap-1 border-r border-gray-300 pr-2">
           <select
+            onMouseDown={preventToolbarFocusLoss}
             onChange={(e) => execCommand('fontSize', e.target.value)}
             className="px-2 py-1 border border-gray-300 rounded text-sm"
             defaultValue="3"
@@ -281,6 +403,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
         <div className="flex items-center gap-1 border-r border-gray-300 pr-2">
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => execCommand('justifyLeft')}
             className="p-2 hover:bg-gray-200 rounded"
             title="Align Left"
@@ -289,6 +412,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           </button>
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => execCommand('justifyCenter')}
             className="p-2 hover:bg-gray-200 rounded"
             title="Align Center"
@@ -297,6 +421,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           </button>
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => execCommand('justifyRight')}
             className="p-2 hover:bg-gray-200 rounded"
             title="Align Right"
@@ -309,6 +434,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
         <div className="flex items-center gap-1 border-r border-gray-300 pr-2">
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => execCommand('insertUnorderedList')}
             className="p-2 hover:bg-gray-200 rounded"
             title="Bullet List"
@@ -317,6 +443,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           </button>
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => execCommand('insertOrderedList')}
             className="p-2 hover:bg-gray-200 rounded"
             title="Numbered List"
@@ -329,6 +456,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
         <div className="flex items-center gap-1">
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={() => {
               const url = prompt('Enter URL:')
               if (url) execCommand('createLink', url)
@@ -340,6 +468,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           </button>
           <button
             type="button"
+            onMouseDown={preventToolbarFocusLoss}
             onClick={handleImageUpload}
             className="p-2 hover:bg-gray-200 rounded"
             title="Insert Image"
@@ -352,7 +481,8 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
         <div className="ml-auto">
           <button
             type="button"
-            onClick={() => execCommand('removeFormat')}
+            onMouseDown={preventToolbarFocusLoss}
+            onClick={clearFormatting}
             className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200"
             title="Clear Formatting"
           >
@@ -377,7 +507,7 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
         }}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        className={`min-h-[400px] p-4 outline-none ${isFocused ? 'ring-2 ring-blue-500' : ''}`}
+        className={`letter-editor-content min-h-[400px] p-4 outline-none overflow-auto ${isFocused ? 'ring-2 ring-blue-500' : ''}`}
         style={{
           fontFamily: 'Arial, sans-serif',
           fontSize: '14px',
@@ -492,18 +622,18 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
             {/* Preview */}
             <div className="mb-4 p-3 bg-gray-50 rounded border border-gray-200">
               <p className="text-xs text-gray-600 mb-2">Preview:</p>
-              <div className="bg-white p-2 rounded border border-gray-300 min-h-[100px] flex items-center justify-center">
+              <div
+                className="bg-white p-2 rounded border border-gray-300 min-h-[100px]"
+                style={{ textAlign: selectedImage?.dataset.align || 'center' }}
+              >
                 <img
                   src={selectedImage?.src}
                   alt="Preview"
                   style={{
-                    width: `${selectedImage?.dataset.width || '100'}%`,
-                    maxWidth: '200px',
+                    width: `${selectedImage?.dataset.width || '50'}%`,
+                    maxWidth: '100%',
                     height: 'auto',
-                    float: selectedImage?.dataset.align || 'left',
-                    display: 'block',
-                    margin: selectedImage?.dataset.align === 'left' ? '0 10px 10px 0' : 
-                            selectedImage?.dataset.align === 'right' ? '0 0 10px 10px' : '10px auto'
+                    display: 'inline-block'
                   }}
                 />
               </div>
@@ -514,7 +644,12 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
                 type="button"
                 onClick={() => {
                   if (selectedImage && confirm('Delete this image?')) {
-                    selectedImage.remove()
+                    const wrapper = selectedImage.closest('.editor-image-wrap')
+                    if (wrapper) {
+                      wrapper.remove()
+                    } else {
+                      selectedImage.remove()
+                    }
                     updateContent()
                     setShowImageOptions(false)
                   }
@@ -542,14 +677,43 @@ export default function SimpleLetterEditor({ value, onChange, placeholder, onVar
           color: #999;
           pointer-events: none;
         }
-        .editor-image {
+        .letter-editor-content {
+          overflow: auto;
+        }
+        .letter-editor-content .editor-image-wrap {
+          display: block;
+          width: 100%;
+          clear: both;
+          margin: 12px 0;
+        }
+        .letter-editor-content .editor-image {
           cursor: pointer;
           transition: opacity 0.2s;
+          max-width: 100%;
+          height: auto;
+          float: none !important;
         }
-        .editor-image:hover {
-          opacity: 0.8;
+        .letter-editor-content .editor-image:hover {
+          opacity: 0.9;
           outline: 2px solid #3b82f6;
           outline-offset: 2px;
+        }
+        .letter-editor-content::after {
+          content: '';
+          display: table;
+          clear: both;
+        }
+        .letter-preview-content .editor-image-wrap,
+        .letter-preview-content img {
+          float: none !important;
+          display: block;
+          max-width: 100%;
+          height: auto;
+          margin: 12px auto;
+        }
+        .letter-preview-content .editor-image-wrap {
+          width: 100%;
+          text-align: center;
         }
       `}</style>
     </div>
