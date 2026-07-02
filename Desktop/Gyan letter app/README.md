@@ -130,25 +130,18 @@ This opens backend and frontend in separate PowerShell windows.
 
 ```text
 gyan-letter-app/
-├── api/                       # Serverless handlers (deployment targets)
-├── backend/
-│   ├── db.js                  # PostgreSQL pool + schema initialization
-│   ├── middleware/
-│   │   └── auth.js
-│   ├── routes/
-│   │   ├── auth.js
-│   │   └── records.js
-│   └── services/
-├── src/
-│   ├── components/
-│   ├── contexts/
-│   ├── services/
-│   ├── App.jsx
-│   └── main.jsx
+├── api/                       # Serverless handlers (Vercel)
+├── backend/                   # Express API routes, DB, auth
+├── src/                       # React frontend
+├── docs/                      # Deployment & troubleshooting guides
 ├── server.js                  # Main Express entrypoint
 ├── start.ps1                  # Windows helper script
+├── vercel.json                # Vercel SPA routing
+├── render.yaml                # Render static site config
 └── package.json
 ```
+
+For extra setup and deployment guides, see [docs/README.md](docs/README.md).
 
 ## Authentication Notes
 
