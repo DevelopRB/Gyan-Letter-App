@@ -155,6 +155,8 @@ export default function DatabaseManager() {
   const [exportReady, setExportReady] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
+  const [exportSourceRecords, setExportSourceRecords] = useState([])
+  const [exportRecordsLoading, setExportRecordsLoading] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [saveModalCategory, setSaveModalCategory] = useState(null)
   const [saveModalFileName, setSaveModalFileName] = useState('')
@@ -213,6 +215,12 @@ export default function DatabaseManager() {
     }
   }, [selectedCategory, searchQuery])
 
+  useEffect(() => {
+    if (showAdvancedFilter) {
+      loadExportRecords()
+    }
+  }, [showAdvancedFilter])
+
   const loadOverviewStats = async () => {
     setOverviewStatsLoading(true)
     try {
@@ -222,6 +230,21 @@ export default function DatabaseManager() {
       console.error('Error loading overview stats:', err)
     } finally {
       setOverviewStatsLoading(false)
+    }
+  }
+
+  const loadExportRecords = async () => {
+    setExportRecordsLoading(true)
+    setExportError(null)
+    try {
+      const allRecords = await databaseService.getAll()
+      setExportSourceRecords(allRecords)
+    } catch (err) {
+      console.error('Error loading records for export:', err)
+      setExportSourceRecords([])
+      setExportError('Failed to load records for export. Please check if the server is running and try again.')
+    } finally {
+      setExportRecordsLoading(false)
     }
   }
 
@@ -1708,9 +1731,9 @@ export default function DatabaseManager() {
     }
   }
 
-  // Advanced filtering functions with query builder
-  const getFilteredRecordsForExport = () => {
-    let result = [...records]
+  // Apply export-modal filters to a full record set (not limited to the current table page)
+  const applyExportFilters = (sourceRecords) => {
+    let result = [...sourceRecords]
 
     // Filter by selected categories
     if (selectedCategories.length > 0) {
@@ -1746,6 +1769,8 @@ export default function DatabaseManager() {
 
     return result
   }
+
+  const getFilteredRecordsForExport = () => applyExportFilters(exportSourceRecords)
 
   // Get unique values for filter dropdowns
   const getUniqueValues = (fieldName) => {
@@ -1851,8 +1876,11 @@ export default function DatabaseManager() {
     setExportError(null)
     
     try {
+      const allRecords = await databaseService.getAll()
+      setExportSourceRecords(allRecords)
+
       // Validation checks with helpful messages
-      const filteredData = getFilteredRecordsForExport()
+      const filteredData = applyExportFilters(allRecords)
       
       if (filteredData.length === 0) {
         const reasons = []
@@ -1992,6 +2020,8 @@ export default function DatabaseManager() {
   // Close advanced filter modal
   const closeAdvancedFilter = () => {
     setShowAdvancedFilter(false)
+    setExportSourceRecords([])
+    setExportRecordsLoading(false)
     setSelectedCategories([])
     setFilterGroups([{
       id: 1,
@@ -2865,14 +2895,16 @@ export default function DatabaseManager() {
                 {/* Preview Count */}
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <p className="text-blue-800 font-semibold">
-                    Records matching filters: {getFilteredRecordsForExport().length}
+                    {exportRecordsLoading
+                      ? 'Loading all records for export...'
+                      : `Records matching filters: ${getFilteredRecordsForExport().length} of ${exportSourceRecords.length} total`}
                   </p>
-                  {selectedColumns.size > 0 && (
+                  {selectedColumns.size > 0 && !exportRecordsLoading && (
                     <p className="text-blue-700 text-sm mt-1">
                       Will export {selectedColumns.size} column(s)
                     </p>
                   )}
-                  {getFilteredRecordsForExport().length === 0 && (
+                  {!exportRecordsLoading && getFilteredRecordsForExport().length === 0 && (
                     <div className="mt-2 text-sm text-orange-700">
                       <p className="font-medium">⚠️ No records match your filters</p>
                       <p className="text-xs mt-1">Try adjusting your filters or selecting different categories</p>
@@ -2909,7 +2941,7 @@ export default function DatabaseManager() {
                 <div className="flex space-x-3">
                   <button
                     onClick={exportToExcel}
-                    disabled={selectedColumns.size === 0 || getFilteredRecordsForExport().length === 0 || exporting}
+                    disabled={selectedColumns.size === 0 || getFilteredRecordsForExport().length === 0 || exporting || exportRecordsLoading}
                     className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                   >
                     {exporting ? (
